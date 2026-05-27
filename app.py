@@ -1,16 +1,25 @@
 """
 MysteryScraper — Streamlit UI
-Linear/Notion-inspired competitive intelligence dashboard for Jerry's Ace Hardware.
+Competitive intelligence dashboard for Jerry's Ace Hardware #17892.
 """
 
+import io
 import json
+import re
+import subprocess
 from pathlib import Path
 from datetime import datetime
 import streamlit as st
 import pandas as pd
+from reportlab.lib.pagesizes import letter
+from reportlab.lib import colors
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.units import inch
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Table, TableStyle, Spacer
+from reportlab.lib.enums import TA_LEFT, TA_CENTER
 
 from analyze import find_gaps, rank_recommendations, diff_snapshots
-from config import CATEGORIES
+from config import BRAND_ALIASES
 
 # --- Page config ---
 st.set_page_config(
@@ -39,7 +48,6 @@ st.markdown("""
         --primary-color: #059669;
     }
 
-    /* Global font and background */
     html, body, [class*="css"] {
         font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif !important;
     }
@@ -53,556 +61,160 @@ st.markdown("""
         max-width: 1400px !important;
     }
 
-    /* Hide Streamlit chrome */
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
     header {visibility: hidden;}
 
-    /* --- Sidebar --- */
     section[data-testid="stSidebar"] {
         background-color: var(--bg-secondary);
         border-right: none;
         width: 260px !important;
     }
-    section[data-testid="stSidebar"] > div {
-        padding-top: 1.5rem;
-    }
-    section[data-testid="stSidebar"] .block-container {
-        padding: 0.5rem 1.25rem !important;
-    }
-    section[data-testid="stSidebar"] hr {
-        border-color: var(--border);
-        margin: 0.75rem 0;
-    }
+    section[data-testid="stSidebar"] > div { padding-top: 1.5rem; }
+    section[data-testid="stSidebar"] .block-container { padding: 0.5rem 1.25rem !important; }
+    section[data-testid="stSidebar"] hr { border-color: var(--border); margin: 0.75rem 0; }
 
-    /* --- Tabs (single underline; hide animated highlight to avoid double green bar) --- */
     .stTabs [data-baseweb="tab-list"] {
-        gap: 0;
-        border-bottom: 1px solid var(--border);
-        background: transparent;
+        gap: 0; border-bottom: 1px solid var(--border); background: transparent;
     }
-    .stTabs [data-baseweb="tab-highlight"] {
-        display: none !important;
-    }
+    .stTabs [data-baseweb="tab-highlight"] { display: none !important; }
     .stTabs [data-baseweb="tab-list"] button {
-        background: transparent !important;
-        border: none !important;
+        background: transparent !important; border: none !important;
         border-bottom: 2px solid transparent !important;
-        color: var(--text-secondary) !important;
-        font-weight: 500 !important;
-        font-size: 13px !important;
-        padding: 10px 20px !important;
-        border-radius: 0 !important;
-        box-shadow: none !important;
-        outline: none !important;
+        color: var(--text-secondary) !important; font-weight: 500 !important;
+        font-size: 13px !important; padding: 10px 20px !important;
+        border-radius: 0 !important; box-shadow: none !important; outline: none !important;
     }
     .stTabs [data-baseweb="tab-list"] button:hover {
-        color: var(--text-primary) !important;
-        border-bottom-color: transparent !important;
+        color: var(--text-primary) !important; border-bottom-color: transparent !important;
     }
     .stTabs [data-baseweb="tab-list"] button[aria-selected="true"] {
-        color: var(--text-primary) !important;
-        border-bottom: 2px solid var(--accent) !important;
-        background: transparent !important;
-        font-weight: 600 !important;
-    }
-    .stTabs [data-baseweb="tab-panel"] {
-        border: none !important;
-        outline: none !important;
+        color: var(--text-primary) !important; border-bottom: 2px solid var(--accent) !important;
+        background: transparent !important; font-weight: 600 !important;
     }
 
-    /* --- Inputs --- */
     .stSelectbox label, .stMultiSelect label, .stTextInput label {
-        color: var(--text-secondary) !important;
-        font-weight: 500 !important;
-        font-size: 12px !important;
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
+        color: var(--text-secondary) !important; font-weight: 500 !important;
+        font-size: 12px !important; text-transform: uppercase; letter-spacing: 0.04em;
     }
-    .stTextInput input,
-    .stTextInput input:focus,
-    .stTextInput input:hover,
-    .stTextInput input:active,
-    .stTextInput > div > div > input {
-        border: 1px solid var(--border) !important;
-        border-radius: 8px !important;
-        padding: 10px 14px !important;
-        font-size: 13px !important;
-        background: var(--bg-primary) !important;
-        color: var(--text-primary) !important;
-        -webkit-text-fill-color: var(--text-primary) !important;
-        box-shadow: none !important;
-        outline: none !important;
+    .stTextInput input, .stTextInput input:focus, .stTextInput input:hover {
+        border: 1px solid var(--border) !important; border-radius: 8px !important;
+        padding: 10px 14px !important; font-size: 13px !important;
+        background: var(--bg-primary) !important; color: var(--text-primary) !important;
+        box-shadow: none !important; outline: none !important;
     }
-    .stTextInput input:focus {
-        background: #f3f4f6 !important;
-    }
-    .stTextInput input::placeholder {
-        color: var(--text-tertiary) !important;
-    }
-    .stTextInput > div,
-    .stTextInput > div > div {
-        border: none !important;
-        box-shadow: none !important;
-        outline: none !important;
+    .stTextInput > div, .stTextInput > div > div {
+        border: none !important; box-shadow: none !important; outline: none !important;
     }
 
-    /* Dropdown menus (selectbox options) */
-    [data-baseweb="popover"],
-    [data-baseweb="menu"],
-    [data-baseweb="menu"] ul,
-    [data-baseweb="menu"] li {
-        background: var(--bg-primary) !important;
-        color: var(--text-primary) !important;
+    [data-baseweb="popover"], [data-baseweb="menu"], [data-baseweb="menu"] ul, [data-baseweb="menu"] li {
+        background: var(--bg-primary) !important; color: var(--text-primary) !important;
     }
-    [data-baseweb="menu"] li:hover,
-    [data-baseweb="menu"] li[aria-selected="true"] {
-        background: var(--bg-hover) !important;
-        color: var(--text-primary) !important;
+    [data-baseweb="menu"] li:hover { background: var(--bg-hover) !important; }
+    .stSelectbox > div > div, .stSelectbox [data-baseweb="select"] > div {
+        border: 1px solid var(--border) !important; border-radius: 8px !important;
+        font-size: 13px !important; background: var(--bg-primary) !important;
+        color: var(--text-primary) !important; box-shadow: none !important;
     }
-    .stSelectbox > div > div,
-    .stSelectbox > div > div:hover,
-    .stSelectbox > div > div:focus,
-    .stSelectbox > div > div:focus-within,
-    .stSelectbox [data-baseweb="select"] > div {
-        border: 1px solid var(--border) !important;
-        border-radius: 8px !important;
-        font-size: 13px !important;
-        background: var(--bg-primary) !important;
-        color: var(--text-primary) !important;
-        box-shadow: none !important;
-        outline: none !important;
-    }
-    .stSelectbox [data-baseweb="select"],
-    .stSelectbox [data-baseweb="select"] span,
-    .stSelectbox [data-baseweb="select"] div,
-    .stSelectbox [data-baseweb="select"] input {
-        color: var(--text-primary) !important;
-        -webkit-text-fill-color: var(--text-primary) !important;
-    }
-    .stSelectbox svg {
-        fill: var(--text-secondary) !important;
-    }
-    section[data-testid="stSidebar"] .stSelectbox [data-baseweb="select"] > div {
-        background: var(--bg-primary) !important;
+    .stSelectbox [data-baseweb="select"], .stSelectbox [data-baseweb="select"] span,
+    .stSelectbox [data-baseweb="select"] div {
+        color: var(--text-primary) !important; -webkit-text-fill-color: var(--text-primary) !important;
     }
 
-    /* --- Remove Streamlit default black/dark borders (white theme) --- */
-    [data-testid="stVerticalBlockBorderWrapper"],
-    [data-testid="stVerticalBlock"] > div,
-    [data-testid="stHorizontalBlock"] > div,
-    [data-testid="stColumn"],
-    [data-testid="stExpander"],
-    [data-testid="stExpander"] details,
-    [data-testid="stExpander"] summary,
-    [data-testid="stWidgetLabel"],
-    .stTabs,
-    .stTabs > div,
-    [data-testid="stMarkdownContainer"],
-    div[data-testid="stMetric"],
-    [data-testid="stDataFrame"],
-    [data-testid="stDataFrame"] > div,
-    [data-testid="stElementContainer"],
-    .element-container {
-        border-color: var(--border) !important;
-        outline: none !important;
-        box-shadow: none !important;
-    }
-    [data-testid="stVerticalBlockBorderWrapper"] {
-        border: none !important;
-    }
-    [data-testid="stExpander"] details {
-        border: none !important;
-        background: var(--bg-secondary) !important;
-    }
-    [data-testid="stExpander"] summary {
-        border: none !important;
-    }
+    [data-testid="stVerticalBlockBorderWrapper"] { border: none !important; }
+    [data-testid="stExpander"] details { border: none !important; background: var(--bg-secondary) !important; }
     [data-testid="stDataFrame"] {
-        border: 1px solid var(--border) !important;
-        border-radius: 10px !important;
-    }
-    [data-testid="stDataFrame"] [data-testid="glideDataEditor"],
-    [data-testid="stDataFrame"] canvas {
-        border: none !important;
+        border: 1px solid var(--border) !important; border-radius: 10px !important;
     }
 
-    /* --- Buttons --- */
     .stButton > button {
-        background-color: var(--accent);
-        color: white;
-        border: none;
-        border-radius: 8px;
-        font-size: 13px;
-        font-weight: 500;
-        padding: 6px 16px;
-        transition: background-color 0.15s ease;
+        background-color: var(--accent); color: white; border: none; border-radius: 8px;
+        font-size: 13px; font-weight: 500; padding: 6px 16px;
     }
-    .stButton > button:hover {
-        background-color: var(--accent-hover);
-        color: white;
-    }
-
-    /* --- Dataframe --- */
-    .stDataFrame {
-        border: none;
-        border-radius: 10px;
-        overflow: hidden;
-    }
-
-    /* --- Expander --- */
-    .streamlit-expanderHeader {
-        font-size: 13px !important;
-        font-weight: 500 !important;
-        color: var(--text-secondary) !important;
-        background: var(--bg-secondary) !important;
-        border: none !important;
-        border-radius: 8px !important;
-        padding: 10px 16px !important;
-    }
-    .streamlit-expanderContent {
-        border: none !important;
-        border-top: none !important;
-        border-radius: 0 0 8px 8px !important;
-    }
-
-    /* --- Custom Components --- */
-    .breadcrumb {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        margin-bottom: 24px;
-        flex-wrap: wrap;
-    }
-    .breadcrumb-item {
-        font-size: 14px;
-        font-weight: 500;
-        color: var(--text-secondary);
-    }
-    .breadcrumb-item.active {
-        color: var(--accent);
-        font-weight: 600;
-    }
-    .breadcrumb-sep {
-        color: var(--text-tertiary);
-        font-size: 13px;
-    }
+    .stButton > button:hover { background-color: var(--accent-hover); color: white; }
 
     .stat-card {
-        background: var(--bg-secondary);
-        border: none !important;
-        border-radius: 10px;
-        padding: 18px 22px;
-        outline: none !important;
-        box-shadow: none !important;
-    }
-    [data-testid="stVerticalBlock"] > div:has(.stat-card),
-    [data-testid="column"] {
-        border: none !important;
-        outline: none !important;
+        background: var(--bg-secondary); border: none !important; border-radius: 10px;
+        padding: 18px 22px; outline: none !important; box-shadow: none !important;
     }
     .stat-label {
-        font-size: 11px;
-        font-weight: 600;
-        text-transform: uppercase;
-        letter-spacing: 0.06em;
-        color: var(--text-secondary);
-        margin-bottom: 6px;
+        font-size: 11px; font-weight: 600; text-transform: uppercase;
+        letter-spacing: 0.06em; color: var(--text-secondary); margin-bottom: 6px;
     }
-    .stat-value {
-        font-size: 30px;
-        font-weight: 700;
-        color: var(--text-primary);
-        line-height: 1.1;
-    }
+    .stat-value { font-size: 30px; font-weight: 700; color: var(--text-primary); line-height: 1.1; }
 
     .summary-text {
-        font-size: 14px;
-        color: var(--text-secondary);
-        line-height: 1.6;
-        margin-bottom: 20px;
+        font-size: 14px; color: var(--text-secondary); line-height: 1.6; margin-bottom: 20px;
     }
-    .summary-text strong {
-        color: var(--text-primary);
-        font-weight: 600;
-    }
+    .summary-text strong { color: var(--text-primary); font-weight: 600; }
 
-    /* Recommendation table */
     .rec-table {
-        width: 100%;
-        border-collapse: separate;
-        border-spacing: 0;
-        font-size: 13px;
-        border: none;
-        border-radius: 10px;
-        overflow: hidden;
+        width: 100%; border-collapse: separate; border-spacing: 0; font-size: 13px;
+        border: none; border-radius: 10px; overflow: hidden;
     }
     .rec-table thead th {
-        text-align: left;
-        padding: 10px 14px;
-        font-size: 11px;
-        font-weight: 600;
-        text-transform: uppercase;
-        letter-spacing: 0.05em;
-        color: var(--text-secondary);
-        background: var(--bg-secondary);
-        border-bottom: 1px solid #f3f4f6;
+        text-align: left; padding: 10px 14px; font-size: 11px; font-weight: 600;
+        text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-secondary);
+        background: var(--bg-secondary); border-bottom: 1px solid #f3f4f6;
     }
     .rec-table tbody td {
-        padding: 12px 14px;
-        color: var(--text-primary);
-        border-bottom: 1px solid #f3f4f6;
-        vertical-align: middle;
+        padding: 12px 14px; color: var(--text-primary); border-bottom: 1px solid #f3f4f6;
     }
-    .rec-table tbody tr:last-child td {
-        border-bottom: none;
-    }
-    .rec-table tbody tr:hover td {
-        background: var(--bg-secondary);
-    }
-    .rec-table .rank-cell {
-        color: var(--text-tertiary);
-        font-weight: 600;
-        font-size: 12px;
-        width: 40px;
-        text-align: center;
-    }
-    .rec-table .product-cell {
-        font-weight: 500;
-        color: var(--text-primary);
-        max-width: 320px;
-    }
-    .rec-table .meta-cell {
-        color: var(--text-secondary);
-        font-size: 12px;
-    }
-    .rec-table .price-cell {
-        font-weight: 600;
-        font-variant-numeric: tabular-nums;
-    }
+    .rec-table tbody tr:last-child td { border-bottom: none; }
+    .rec-table tbody tr:hover td { background: var(--bg-secondary); }
+    .rec-table .rank-cell { color: var(--text-tertiary); font-weight: 600; font-size: 12px; width: 40px; text-align: center; }
+    .rec-table .product-cell { font-weight: 500; max-width: 320px; }
+    .rec-table .meta-cell { color: var(--text-secondary); font-size: 12px; }
+    .rec-table .price-cell { font-weight: 600; font-variant-numeric: tabular-nums; }
 
-    /* Signal badges */
-    .badge {
-        display: inline-block;
-        padding: 3px 10px;
-        border-radius: 9999px;
-        font-size: 11px;
-        font-weight: 500;
-        line-height: 1.4;
-        white-space: nowrap;
-    }
-    .badge-bestseller {
-        background: #d1fae5;
-        color: #065f46;
-    }
-    .badge-high-rated {
-        background: #dbeafe;
-        color: #1d4ed8;
-    }
-    .badge-empty {
-        color: var(--text-tertiary);
-        font-size: 13px;
-    }
+    .badge { display: inline-block; padding: 3px 10px; border-radius: 9999px; font-size: 11px; font-weight: 500; }
+    .badge-bestseller { background: #d1fae5; color: #065f46; }
+    .badge-high-rated { background: #dbeafe; color: #1d4ed8; }
+    .badge-empty { color: var(--text-tertiary); font-size: 13px; }
 
-    /* Source dots */
-    .source-tag {
-        display: inline-flex;
-        align-items: center;
-        gap: 5px;
-        font-size: 12px;
-        color: var(--text-secondary);
-        margin-right: 6px;
-    }
-    .source-dot {
-        width: 6px;
-        height: 6px;
-        border-radius: 50%;
-        display: inline-block;
-    }
+    .source-tag { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--text-secondary); margin-right: 6px; }
+    .source-dot { width: 6px; height: 6px; border-radius: 50%; display: inline-block; }
 
-    /* Score bar */
-    .score-bar-wrap {
-        display: flex;
-        align-items: center;
-        gap: 10px;
-    }
-    .score-bar-track {
-        width: 64px;
-        height: 6px;
-        background: #e5e7eb;
-        border-radius: 3px;
-        overflow: hidden;
-    }
-    .score-bar-fill {
-        height: 100%;
-        background: var(--accent);
-        border-radius: 3px;
-        transition: width 0.3s ease;
-    }
-    .score-num {
-        font-size: 12px;
-        font-weight: 600;
-        color: var(--text-secondary);
-        font-variant-numeric: tabular-nums;
-        min-width: 18px;
-    }
+    .score-bar-wrap { display: flex; align-items: center; gap: 10px; }
+    .score-bar-track { width: 64px; height: 6px; background: #e5e7eb; border-radius: 3px; overflow: hidden; }
+    .score-bar-fill { height: 100%; background: var(--accent); border-radius: 3px; }
+    .score-num { font-size: 12px; font-weight: 600; color: var(--text-secondary); min-width: 18px; }
 
-    /* Empty state */
-    .empty-state {
-        text-align: center;
-        padding: 72px 24px;
-    }
-    .empty-state-icon {
-        font-size: 44px;
-        margin-bottom: 14px;
-        opacity: 0.6;
-    }
-    .empty-state-title {
-        font-size: 16px;
-        font-weight: 600;
-        color: var(--text-primary);
-        margin-bottom: 6px;
-    }
-    .empty-state-desc {
-        font-size: 13px;
-        color: var(--text-secondary);
-        max-width: 420px;
-        margin: 0 auto;
-        line-height: 1.6;
-    }
+    .breadcrumb { display: flex; align-items: center; gap: 8px; margin-bottom: 24px; flex-wrap: wrap; }
+    .breadcrumb-item { font-size: 14px; font-weight: 500; color: var(--text-secondary); }
+    .breadcrumb-item.active { color: var(--accent); font-weight: 600; }
+    .breadcrumb-sep { color: var(--text-tertiary); font-size: 13px; }
 
-    /* Sidebar wordmark */
-    .sidebar-wordmark {
-        font-size: 15px;
-        font-weight: 700;
-        color: var(--text-primary);
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        margin-bottom: 4px;
-    }
-    .sidebar-wordmark-icon {
-        width: 24px;
-        height: 24px;
-        background: var(--accent);
-        border-radius: 6px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        font-size: 13px;
-    }
-    .sidebar-context {
-        font-size: 12px;
-        color: var(--text-secondary);
-        line-height: 1.5;
-    }
-    .sidebar-stat {
-        font-size: 12px;
-        color: var(--text-tertiary);
-        line-height: 1.8;
-    }
-    .sidebar-section-label {
-        font-size: 10px;
-        font-weight: 600;
-        text-transform: uppercase;
-        letter-spacing: 0.08em;
-        color: var(--text-tertiary);
-        margin-bottom: 8px;
-        margin-top: 4px;
-    }
-
-    /* Scoring table */
-    .scoring-table {
-        width: 100%;
-        border-collapse: collapse;
-        font-size: 13px;
-    }
-    .scoring-table td {
-        padding: 6px 0;
-        color: var(--text-secondary);
-    }
-    .scoring-table td:last-child {
-        text-align: right;
-        font-weight: 600;
-        color: var(--text-primary);
-        font-variant-numeric: tabular-nums;
-    }
-
-    /* Info box */
-    .info-box {
-        background: var(--bg-secondary);
-        border: none;
-        border-radius: 8px;
-        padding: 12px 16px;
-        font-size: 13px;
-        color: var(--text-secondary);
-        line-height: 1.5;
-    }
-
-    /* Sources bar */
     .sources-bar {
-        display: flex;
-        align-items: center;
-        gap: 20px;
-        margin-bottom: 20px;
-        padding: 12px 18px;
-        background: var(--bg-secondary);
-        border-radius: 10px;
+        display: flex; align-items: center; gap: 20px; margin-bottom: 20px;
+        padding: 12px 18px; background: var(--bg-secondary); border-radius: 10px;
     }
-    .sources-bar-label {
-        font-size: 11px;
-        font-weight: 600;
-        text-transform: uppercase;
-        letter-spacing: 0.06em;
-        color: var(--text-tertiary);
-    }
-    .source-chip {
-        display: inline-flex;
-        align-items: center;
-        gap: 7px;
-        font-size: 13px;
-        font-weight: 500;
-        color: var(--text-primary);
-    }
-    .source-chip-dot {
-        width: 8px;
-        height: 8px;
-        border-radius: 50%;
-        display: inline-block;
-    }
+    .sources-bar-label { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-tertiary); }
+    .source-chip { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; font-weight: 500; color: var(--text-primary); }
+    .source-chip-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
 
-    /* Result count */
-    .result-count {
-        font-size: 13px;
-        color: var(--text-secondary);
-        margin-bottom: 12px;
-    }
-    .result-count strong {
-        color: var(--text-primary);
-        font-weight: 600;
-    }
+    .result-count { font-size: 13px; color: var(--text-secondary); margin-bottom: 12px; }
+    .result-count strong { color: var(--text-primary); font-weight: 600; }
 
-    /* MoM metric cards */
-    .mom-card {
-        background: var(--bg-secondary);
-        border: none;
-        border-radius: 10px;
-        padding: 16px 20px;
-        text-align: center;
-    }
-    .mom-card-value {
-        font-size: 26px;
-        font-weight: 700;
-        color: var(--text-primary);
-    }
-    .mom-card-label {
-        font-size: 11px;
-        font-weight: 600;
-        text-transform: uppercase;
-        letter-spacing: 0.05em;
-        color: var(--text-secondary);
-        margin-top: 4px;
-    }
+    .scoring-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    .scoring-table td { padding: 6px 0; color: var(--text-secondary); }
+    .scoring-table td:last-child { text-align: right; font-weight: 600; color: var(--text-primary); }
+
+    .info-box { background: var(--bg-secondary); border: none; border-radius: 8px; padding: 12px 16px; font-size: 13px; color: var(--text-secondary); }
+
+    .sidebar-wordmark { font-size: 15px; font-weight: 700; color: var(--text-primary); display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+    .sidebar-wordmark-icon { width: 24px; height: 24px; background: var(--accent); border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 13px; }
+    .sidebar-context { font-size: 12px; color: var(--text-secondary); line-height: 1.5; }
+    .sidebar-stat { font-size: 12px; color: var(--text-tertiary); line-height: 1.8; }
+    .sidebar-section-label { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-tertiary); margin-bottom: 8px; margin-top: 4px; }
+
+    .empty-state { text-align: center; padding: 72px 24px; }
+    .empty-state-title { font-size: 16px; font-weight: 600; color: var(--text-primary); margin-bottom: 6px; }
+    .empty-state-desc { font-size: 13px; color: var(--text-secondary); max-width: 420px; margin: 0 auto; line-height: 1.6; }
+
+    .mom-card { background: var(--bg-secondary); border: none; border-radius: 10px; padding: 16px 20px; text-align: center; }
+    .mom-card-value { font-size: 26px; font-weight: 700; color: var(--text-primary); }
+    .mom-card-label { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-secondary); margin-top: 4px; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -656,6 +268,132 @@ def stat_card(label: str, value) -> str:
     )
 
 
+def generate_gaps_pdf(recs: list, gaps_count: int, num_comp: int, snap_dt: str, cat_filter: str = "All") -> bytes:
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buf,
+        pagesize=letter,
+        leftMargin=0.75 * inch,
+        rightMargin=0.75 * inch,
+        topMargin=0.75 * inch,
+        bottomMargin=0.75 * inch,
+    )
+
+    accent = colors.HexColor("#059669")
+    light_bg = colors.HexColor("#f9fafb")
+    border_color = colors.HexColor("#e5e7eb")
+    text_secondary = colors.HexColor("#6b7280")
+
+    styles = getSampleStyleSheet()
+    title_style = ParagraphStyle("title", parent=styles["Normal"], fontSize=18, fontName="Helvetica-Bold", textColor=colors.HexColor("#111827"), spaceAfter=8)
+    subtitle_style = ParagraphStyle("subtitle", parent=styles["Normal"], fontSize=10, fontName="Helvetica", textColor=text_secondary, spaceAfter=20)
+    section_style = ParagraphStyle("section", parent=styles["Normal"], fontSize=11, fontName="Helvetica-Bold", textColor=colors.HexColor("#111827"), spaceBefore=24, spaceAfter=10)
+    small_style = ParagraphStyle("small", parent=styles["Normal"], fontSize=8, fontName="Helvetica", textColor=text_secondary)
+
+    story = []
+
+    # Header
+    story.append(Paragraph("Gaps & Recommendations", title_style))
+    filter_note = f" — Category: {cat_filter}" if cat_filter != "All" else ""
+    story.append(Paragraph(
+        f"Jerry's Ace Hardware #17892 · Denver, CO · {snap_dt}{filter_note}",
+        subtitle_style,
+    ))
+
+    # Summary line
+    story.append(Paragraph(
+        f"Found <b>{gaps_count:,} gaps</b> across <b>{num_comp} competitors</b>. "
+        f"Top <b>{len(recs)}</b> products ranked by competitive signal strength.",
+        ParagraphStyle("summary", parent=styles["Normal"], fontSize=10, fontName="Helvetica",
+                       textColor=colors.HexColor("#374151"), spaceAfter=14),
+    ))
+
+    # Recommendations table
+    story.append(Paragraph("Top Recommendations", section_style))
+
+    header = ["#", "Product", "Brand", "Category", "Price", "Sources", "Signal", "Score"]
+    # Total = 7.0" to fit within letter page at 0.75" margins each side
+    col_widths = [0.25 * inch, 2.15 * inch, 0.95 * inch, 0.85 * inch, 0.6 * inch, 0.9 * inch, 0.75 * inch, 0.45 * inch]
+
+    cell_style = ParagraphStyle("cell", fontSize=8, fontName="Helvetica", leading=10)
+
+    table_data = [header]
+    filtered_recs = [r for r in recs if cat_filter == "All" or r.get("category") == cat_filter]
+
+    for i, r in enumerate(filtered_recs, 1):
+        sources = r.get("sources", [r.get("source", "")])
+        price_str = f"${r['price']:.2f}" if r.get("price") else "—"
+        signal = r.get("signal", "").replace("_", " ").title() or "—"
+        sources_str = ", ".join(s.replace("Home Depot", "Home Dep") for s in sources[:2])
+        table_data.append([
+            str(i),
+            Paragraph(r["name"][:75], cell_style),
+            Paragraph(r.get("brand", ""), cell_style),
+            Paragraph(r.get("category", ""), cell_style),
+            price_str,
+            Paragraph(sources_str, cell_style),
+            signal,
+            str(r["score"]),
+        ])
+
+    tbl = Table(table_data, colWidths=col_widths, repeatRows=1)
+    tbl.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), accent),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("FONTSIZE", (0, 0), (-1, 0), 8),
+        ("FONTNAME", (0, 1), (-1, -1), "Helvetica"),
+        ("FONTSIZE", (0, 1), (-1, -1), 8),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, light_bg]),
+        ("GRID", (0, 0), (-1, -1), 0.4, border_color),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 5),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 5),
+        ("TOPPADDING", (0, 0), (-1, -1), 4),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+        ("ALIGN", (0, 0), (0, -1), "CENTER"),
+        ("ALIGN", (4, 0), (4, -1), "RIGHT"),
+        ("ALIGN", (7, 0), (7, -1), "CENTER"),
+    ]))
+    story.append(tbl)
+
+    # Scoring legend
+    story.append(Spacer(1, 20))
+    story.append(Paragraph("Scoring Guide", section_style))
+    scoring_rows = [
+        ["Bestseller badge at competitor", "+10"],
+        ["High Rated badge at competitor", "+5"],
+        ["Customer rating 4.0+", "+3"],
+        ["100+ customer reviews", "+2"],
+        ["500+ customer reviews", "+3"],
+        ["Has listed price", "+1"],
+        ["Each additional competitor carrying it", "+3"],
+    ]
+    score_tbl = Table(scoring_rows, colWidths=[4.5 * inch, 0.6 * inch])
+    score_tbl.setStyle(TableStyle([
+        ("FONTNAME", (0, 0), (-1, -1), "Helvetica"),
+        ("FONTSIZE", (0, 0), (-1, -1), 8),
+        ("TEXTCOLOR", (0, 0), (0, -1), colors.HexColor("#374151")),
+        ("TEXTCOLOR", (1, 0), (1, -1), accent),
+        ("FONTNAME", (1, 0), (1, -1), "Helvetica-Bold"),
+        ("ALIGN", (1, 0), (1, -1), "RIGHT"),
+        ("TOPPADDING", (0, 0), (-1, -1), 3),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+        ("LINEBELOW", (0, 0), (-1, -2), 0.3, border_color),
+    ]))
+    story.append(score_tbl)
+
+    # Footer
+    story.append(Spacer(1, 24))
+    story.append(Paragraph(
+        f"Generated by MysteryScraper · {datetime.now().strftime('%B %d, %Y at %I:%M %p')}",
+        small_style,
+    ))
+
+    doc.build(story)
+    return buf.getvalue()
+
+
 def render_recommendations_table(recs: list, category_filter: str = "All") -> str:
     rows_html = []
     for i, r in enumerate(recs, 1):
@@ -702,38 +440,58 @@ def render_recommendations_table(recs: list, category_filter: str = "All") -> st
     )
 
 
-def find_similar_ace_products(product_name, brand, category, ace_products):
-    """Find the closest Jerry's products to show what he carries in the same space."""
-    name_lower = product_name.lower()
-    brand_lower = brand.lower() if brand else ""
-    matches = []
-    for p in ace_products:
-        ace_name = p.get("name", "").lower()
-        ace_cat = p.get("category", "")
-        # Match by category
-        if category and ace_cat == category:
-            # Score relevance by shared words
-            words = set(name_lower.split()) - {"the", "a", "an", "and", "or", "for", "with", "in", "of", "to"}
-            ace_words = set(ace_name.split()) - {"the", "a", "an", "and", "or", "for", "with", "in", "of", "to"}
-            overlap = len(words & ace_words)
-            if overlap >= 1:
-                matches.append({"product": p, "overlap": overlap})
-    matches.sort(key=lambda x: x["overlap"], reverse=True)
-    return [m["product"] for m in matches[:5]]
-
-
 # --- Data loading ---
+@st.cache_data
+def load_jerrys_md():
+    """Parse verified Jerry's inventory from markdown."""
+    md_path = Path("/Users/Welcome123/.superset/worktrees/MysteryScraper/clarification-needed/output/ace/jerrys_paint_products.md")
+    if not md_path.exists():
+        return pd.DataFrame(), []
+
+    text = md_path.read_text()
+    rows = []
+    current_cat = ""
+    for line in text.splitlines():
+        if line.startswith("## "):
+            m = re.match(r"## (.+?) \((\d+)\)", line)
+            if m:
+                current_cat = m.group(1)
+        if line.startswith("| ") and not line.startswith("| Brand") and not line.startswith("|---"):
+            parts = [c.strip() for c in line.split("|")[1:-1]]
+            if len(parts) >= 4:
+                price_str = parts[2].replace("$", "").replace(",", "")
+                try:
+                    price = float(price_str)
+                except ValueError:
+                    price = 0.0
+                try:
+                    qty = int(parts[3])
+                except ValueError:
+                    qty = 0
+                rows.append({
+                    "brand": parts[0],
+                    "product": parts[1],
+                    "price": price,
+                    "qty": qty,
+                    "category": current_cat,
+                })
+
+    df = pd.DataFrame(rows)
+    # Also build list format for gap analysis
+    ace_products = [{"name": r["product"], "brand": r["brand"], "price": r["price"],
+                     "category": r["category"], "qty": r["qty"]} for r in rows]
+    return df, ace_products
+
+
 @st.cache_data
 def load_snapshot(snapshot_dir="data/snapshots"):
     snap_dir = Path(snapshot_dir)
     if not snap_dir.exists():
-        return None, None, None
+        return None, None
 
     comp_files = sorted(snap_dir.glob("*_competitors.json"))
-    ace_files = sorted(snap_dir.glob("*_ace_catalog.json"))
-
     if not comp_files:
-        return None, None, None
+        return None, None
 
     latest_comp = comp_files[-1]
     snap_date = latest_comp.stem.split("_")[0]
@@ -741,12 +499,7 @@ def load_snapshot(snapshot_dir="data/snapshots"):
     with open(latest_comp) as f:
         competitors = json.load(f)
 
-    ace_products = []
-    if ace_files:
-        with open(ace_files[-1]) as f:
-            ace_products = json.load(f)
-
-    return competitors, ace_products, snap_date
+    return competitors, snap_date
 
 
 @st.cache_data
@@ -761,40 +514,150 @@ def load_diff(diff_dir="data/diffs"):
         return json.load(f)
 
 
-# --- Load data ---
-competitors, ace_products, snap_date = load_snapshot()
+@st.cache_data
+def load_serpapi_data():
+    """Load scraped SerpAPI data from output/serpapi/."""
+    serpapi_dir = Path("output/serpapi")
+    if not serpapi_dir.exists():
+        return pd.DataFrame()
 
-if not competitors:
-    st.markdown(
-        '<div class="breadcrumb">'
-        '<span class="breadcrumb-item active">MysteryScraper</span>'
-        '</div>',
-        unsafe_allow_html=True,
-    )
-    st.markdown(
-        '<div class="empty-state">'
-        '<div class="empty-state-icon" style="font-size:32px; color:#9ca3af;">--</div>'
-        '<div class="empty-state-title">No snapshot data found</div>'
-        '<div class="empty-state-desc">'
-        'Run <code>python run_snapshot.py</code> to scrape competitor data and generate your first intelligence report.'
-        '</div></div>',
-        unsafe_allow_html=True,
-    )
-    st.stop()
+    store_files = {
+        "Home Depot": "home_depot.json",
+        "Target": "target.json",
+        "Lowes": "lowes.json",
+        "Walmart": "walmart.json",
+        "Home Depot (Native)": "home_depot_native.json",
+        "Walmart (Apify)": "walmart_apify.json",
+        "Target (Redsky)": "target_redsky.json",
+        "Ace Hardware": "ace_hardware.json",
+    }
+
+    all_rows = []
+    for store, filename in store_files.items():
+        filepath = serpapi_dir / filename
+        if not filepath.exists():
+            continue
+        try:
+            with open(filepath) as f:
+                items = json.load(f)
+            for item in items:
+                # Extract price from various formats
+                price_raw = item.get("price", item.get("extracted_price"))
+                # Target Redsky nests price differently
+                if price_raw is None and "price" in item.get("item", {}):
+                    offer = item.get("item", {}).get("price", {}).get("formatted_current_price")
+                    if offer:
+                        price_raw = offer
+                # Walmart Apify uses different fields
+                if price_raw is None:
+                    price_raw = item.get("priceInfo", {}).get("currentPrice", {}).get("price") if isinstance(item.get("priceInfo"), dict) else None
+                # Ace uses retailPrice
+                if price_raw is None:
+                    price_raw = item.get("retailPrice")
+
+                price = None
+                if price_raw is not None:
+                    if isinstance(price_raw, (int, float)):
+                        price = float(price_raw)
+                    elif isinstance(price_raw, str):
+                        cleaned = re.sub(r'[^\d.]', '', price_raw)
+                        try:
+                            price = float(cleaned)
+                        except ValueError:
+                            pass
+
+                # Extract name from various formats
+                name = (
+                    item.get("title")
+                    or item.get("name")
+                    or item.get("item", {}).get("product_description", {}).get("title", "")
+                    or item.get("productName", "")
+                    or ""
+                )
+
+                # Extract rating
+                rating = (
+                    item.get("rating")
+                    or item.get("item", {}).get("ratings_and_reviews", {}).get("statistics", {}).get("rating", {}).get("average")
+                )
+
+                # Extract reviews
+                reviews = (
+                    item.get("reviews")
+                    or item.get("total_reviews")
+                    or item.get("item", {}).get("ratings_and_reviews", {}).get("statistics", {}).get("rating", {}).get("count")
+                )
+
+                if not name:
+                    continue
+
+                all_rows.append({
+                    "Source": store,
+                    "Name": str(name)[:100],
+                    "Price": price,
+                    "Rating": float(rating) if rating else None,
+                    "Reviews": int(reviews) if reviews else None,
+                    "Link": item.get("link", item.get("product_link", item.get("url", ""))),
+                    "Thumbnail": item.get("thumbnail", item.get("image", "")),
+                })
+        except Exception:
+            continue
+
+    return pd.DataFrame(all_rows) if all_rows else pd.DataFrame()
+
+
+# --- Load data ---
+jerrys_df, ace_products = load_jerrys_md()
+competitors, snap_date = load_snapshot()
+serpapi_df = load_serpapi_data()
+
+has_jerrys = not jerrys_df.empty
+has_snapshot = bool(competitors)
+has_serpapi = not serpapi_df.empty
+
+# If no snapshot but we have SerpAPI data, build competitors from it
+if not has_snapshot and has_serpapi:
+    competitors = []
+    for _, row in serpapi_df.iterrows():
+        source = row.get("Source", "")
+        if "(Native)" in source:
+            source = source.replace(" (Native)", "")
+        competitors.append({
+            "source": source,
+            "name": row.get("Name", ""),
+            "brand": "",
+            "price": row.get("Price"),
+            "rating": row.get("Rating"),
+            "reviews": row.get("Reviews"),
+            "category": "paint",
+            "search_term": "serpapi",
+            "url": row.get("Link", ""),
+            "signal": "",
+        })
+    snap_date = datetime.now().strftime("%Y-%m-%d")
+    has_snapshot = True
 
 # --- Analysis ---
-gaps = find_gaps(ace_products, competitors)
-recommendations = rank_recommendations(gaps)
+if has_jerrys and has_snapshot:
+    gaps = find_gaps(ace_products, competitors)
+    recommendations = rank_recommendations(gaps)
+else:
+    gaps = []
+    recommendations = []
+
 diff_data = load_diff()
 
-# Format date nicely
-try:
-    date_display = datetime.strptime(snap_date, "%Y-%m-%d").strftime("%b %d, %Y")
-except ValueError:
-    date_display = snap_date
+if snap_date:
+    try:
+        date_display = datetime.strptime(snap_date, "%Y-%m-%d").strftime("%b %d, %Y")
+    except ValueError:
+        date_display = snap_date
+else:
+    date_display = datetime.now().strftime("%b %d, %Y")
 
-num_competitors = len(set(p["source"] for p in competitors))
-num_categories = len(set(p["category"] for p in competitors if p.get("category")))
+num_competitors = len(set(p["source"] for p in competitors)) if competitors else 0
+comp_categories = set(p["category"] for p in competitors if p.get("category")) if competitors else set()
+jerry_categories = sorted(jerrys_df["category"].unique()) if has_jerrys else []
 
 # --- Sidebar ---
 with st.sidebar:
@@ -806,36 +669,67 @@ with st.sidebar:
         unsafe_allow_html=True,
     )
     st.markdown(
-        f'<div class="sidebar-context">'
-        f"Jerry's Ace Hardware #17892<br>"
-        f"2101 N Humboldt St, Denver CO"
-        f"</div>",
+        '<div class="sidebar-context">'
+        "Jerry's Ace Hardware #17892<br>"
+        "2101 N Humboldt St, Denver CO 80205"
+        "</div>",
         unsafe_allow_html=True,
     )
 
     st.markdown("---")
 
     st.markdown('<div class="sidebar-section-label">Filters</div>', unsafe_allow_html=True)
-    cat_options = ["All"] + list(CATEGORIES.keys())
+    cat_options = ["All"] + jerry_categories
     selected_cat = st.selectbox("Category", cat_options, label_visibility="collapsed")
 
-    source_options = ["All"] + sorted(set(p["source"] for p in competitors))
+    all_comp_sources = sorted(set(p["source"] for p in competitors)) if competitors else []
+    source_options = ["All"] + all_comp_sources
     selected_source = st.selectbox("Competitor", source_options, label_visibility="collapsed")
 
     st.markdown("---")
 
+    serpapi_count = len(serpapi_df) if has_serpapi else 0
+    snapshot_count = len(competitors) if competitors else 0
     st.markdown(
         f'<div class="sidebar-section-label">Snapshot</div>'
         f'<div class="sidebar-stat">'
         f"{date_display}<br>"
-        f"{len(competitors):,} competitor products<br>"
-        f"{len(ace_products):,} Jerry's products<br>"
+        f"{snapshot_count:,} competitor products<br>"
+        f"{serpapi_count:,} scraped products<br>"
+        f"{len(ace_products):,} Jerry's verified products<br>"
+        f"{len(jerry_categories)} categories<br>"
         f"{num_competitors} competitors tracked"
         f"</div>",
         unsafe_allow_html=True,
     )
 
-# --- Breadcrumb header ---
+    st.markdown("---")
+
+    st.markdown('<div class="sidebar-section-label">Actions</div>', unsafe_allow_html=True)
+    if st.button("Re-run Scrapers", use_container_width=True):
+        with st.spinner("Running all scrapers (SerpAPI + Apify + Direct APIs)..."):
+            result = subprocess.run(
+                ["python3", "-u", "scrape_all.py"],
+                capture_output=True, text=True, timeout=1200,
+                cwd=str(Path(__file__).parent),
+            )
+        if result.returncode == 0:
+            st.success(f"Scrape complete! Refreshing data & analysis...")
+            with st.expander("Scraper output"):
+                st.code(result.stdout, language="text")
+            st.cache_data.clear()
+            st.rerun()
+        else:
+            st.error("Scraper failed!")
+            with st.expander("Error log"):
+                st.code(result.stderr or result.stdout, language="text")
+
+# --- Filter Jerry's data ---
+jf = jerrys_df.copy() if has_jerrys else pd.DataFrame()
+if has_jerrys and selected_cat != "All":
+    jf = jf[jf["category"] == selected_cat]
+
+# --- Breadcrumb ---
 st.markdown(
     f'<div class="breadcrumb">'
     f'<span class="breadcrumb-item active">Jerry\'s Ace #17892</span>'
@@ -848,22 +742,33 @@ st.markdown(
 )
 
 # --- Stat cards ---
-col1, col2, col3, col4 = st.columns(4)
+col1, col2, col3, col4, col5 = st.columns(5)
 with col1:
-    st.markdown(stat_card("Total Gaps", f"{len(gaps):,}"), unsafe_allow_html=True)
+    val = f"{len(jf):,}" if has_jerrys else "—"
+    st.markdown(stat_card("Jerry's Products", val), unsafe_allow_html=True)
 with col2:
-    st.markdown(stat_card("Recommended Adds", len(recommendations)), unsafe_allow_html=True)
+    val = f"{jf['qty'].sum():,}" if has_jerrys and 'qty' in jf.columns else "—"
+    st.markdown(stat_card("Total Units", val), unsafe_allow_html=True)
 with col3:
-    st.markdown(stat_card("Competitors Tracked", num_competitors), unsafe_allow_html=True)
+    val = f"{len(jf['brand'].unique())}" if has_jerrys and 'brand' in jf.columns else "—"
+    st.markdown(stat_card("Jerry's Brands", val), unsafe_allow_html=True)
 with col4:
-    st.markdown(stat_card("Categories", num_categories), unsafe_allow_html=True)
+    st.markdown(stat_card("Gaps Found", f"{len(gaps):,}"), unsafe_allow_html=True)
+with col5:
+    scraped_total = len(serpapi_df) if has_serpapi else 0
+    st.markdown(stat_card("Scraped Products", f"{scraped_total:,}"), unsafe_allow_html=True)
 
 # --- Sources bar ---
-all_sources = sorted(set(p["source"] for p in competitors))
+all_sources = sorted(set(p["source"] for p in competitors)) if competitors else []
+if has_serpapi:
+    serpapi_sources = sorted(serpapi_df["Source"].unique())
+    all_sources = sorted(set(all_sources) | set(s.replace(" (Native)", "") for s in serpapi_sources))
 source_chips = []
 for s in all_sources:
     color = SOURCE_COLORS.get(s, "#9ca3af")
-    count = sum(1 for p in competitors if p["source"] == s)
+    count = sum(1 for p in (competitors or []) if p.get("source") == s)
+    if has_serpapi:
+        count += len(serpapi_df[serpapi_df["Source"].str.contains(s, na=False)])
     source_chips.append(
         f'<span class="source-chip">'
         f'<span class="source-chip-dot" style="background:{color};"></span>'
@@ -878,14 +783,89 @@ st.markdown(
 )
 
 # --- Tabs ---
-tab1, tab2, tab3 = st.tabs(["Gaps & Recommendations", "Competitor Catalog", "Changes"])
+tab1, tab2, tab3, tab4, tab5 = st.tabs(["Jerry's Inventory", "Gaps & Recommendations", "Competitor Catalog", "Changes", "Scraped Data"])
 
-# --- Tab 1: Recommendations ---
+# --- Tab 1: Jerry's Inventory ---
 with tab1:
+  if not has_jerrys:
+    st.markdown(
+        '<div class="empty-state">'
+        '<div class="empty-state-title">No Jerry\'s inventory data loaded</div>'
+        '<div class="empty-state-desc">Check the inventory file path.</div>'
+        '</div>',
+        unsafe_allow_html=True,
+    )
+  else:
+    st.markdown(
+        f'<div class="summary-text">'
+        f'<strong>{len(jf):,} verified in-stock products</strong> across '
+        f'<strong>{len(jf["brand"].unique())} brands</strong> and '
+        f'<strong>{len(jf["category"].unique())} categories</strong> at '
+        f"Jerry's Ace Hardware #17892, Denver CO."
+        f'</div>',
+        unsafe_allow_html=True,
+    )
+
+    # Brand breakdown
+    st.markdown("**Brand Summary**")
+    brand_stats = jf.groupby("brand").agg(
+        products=("product", "count"),
+        total_units=("qty", "sum"),
+        avg_price=("price", "mean"),
+        min_price=("price", "min"),
+        max_price=("price", "max"),
+    ).sort_values("products", ascending=False).reset_index()
+
+    st.dataframe(
+        brand_stats,
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            "brand": "Brand",
+            "products": st.column_config.NumberColumn("Products"),
+            "total_units": st.column_config.NumberColumn("Units"),
+            "avg_price": st.column_config.NumberColumn("Avg Price", format="$%.2f"),
+            "min_price": st.column_config.NumberColumn("Min", format="$%.2f"),
+            "max_price": st.column_config.NumberColumn("Max", format="$%.2f"),
+        },
+    )
+
+    # Full product table
+    st.markdown("**Full Product List**")
+    st.dataframe(
+        jf[["category", "brand", "product", "price", "qty"]].sort_values(["category", "brand"]),
+        use_container_width=True,
+        hide_index=True,
+        height=500,
+        column_config={
+            "category": "Category",
+            "brand": "Brand",
+            "product": st.column_config.TextColumn("Product", width="large"),
+            "price": st.column_config.NumberColumn("Price", format="$%.2f"),
+            "qty": st.column_config.NumberColumn("Stock"),
+        },
+    )
+
+    # Low stock alert
+    low_stock = jf[jf["qty"] <= 3].sort_values("qty")
+    if not low_stock.empty:
+        st.markdown(f"**Low Stock Alert** ({len(low_stock)} items with 3 or fewer units)")
+        st.dataframe(
+            low_stock[["category", "brand", "product", "price", "qty"]],
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "price": st.column_config.NumberColumn("Price", format="$%.2f"),
+                "qty": st.column_config.NumberColumn("Stock"),
+            },
+        )
+
+
+# --- Tab 2: Gaps & Recommendations ---
+with tab2:
     if not recommendations:
         st.markdown(
             '<div class="empty-state">'
-            '<div class="empty-state-icon" style="font-size:32px; color:#9ca3af;">--</div>'
             '<div class="empty-state-title">No gap recommendations found</div>'
             '<div class="empty-state-desc">'
             "All competitor products appear to be covered by Jerry's current catalog."
@@ -896,9 +876,8 @@ with tab1:
         st.markdown(
             f'<div class="summary-text">'
             f'Found <strong>{len(gaps):,} gaps</strong> across '
-            f'<strong>{num_competitors} competitors</strong> in '
-            f'<strong>{num_categories} categories</strong>. '
-            f'Here are the top <strong>{len(recommendations)}</strong> products '
+            f'<strong>{num_competitors} competitors</strong>. '
+            f'Top <strong>{len(recommendations)}</strong> products '
             f"Jerry's should consider stocking, ranked by competitive signal strength."
             f'</div>',
             unsafe_allow_html=True,
@@ -917,87 +896,75 @@ with tab1:
             st.markdown(
                 '<div style="font-size:13px; font-weight:600; color:#6b7280; '
                 'text-transform:uppercase; letter-spacing:0.05em; margin-bottom:10px;">'
-                'Product Details — click to expand</div>',
+                'Product Details</div>',
                 unsafe_allow_html=True,
             )
 
-            for i, r in enumerate(filtered_recs, 1):
+            for i, r in enumerate(filtered_recs[:15], 1):
                 sources = r.get("sources", [r.get("source", "")])
-                sig = r.get("signal", "")
                 price_str = f"${r['price']:.2f}" if r.get("price") else "N/A"
 
                 with st.expander(f"#{i}  {r['name'][:70]}"):
                     dcol1, dcol2 = st.columns(2)
-
                     with dcol1:
                         rating_str = f"{r['rating']:.1f}" if r.get("rating") else "N/A"
                         reviews_str = f"{int(r['reviews']):,}" if r.get("reviews") else "N/A"
                         st.markdown(
-                            f'<div style="font-size:13px; font-weight:600; color:#111827; margin-bottom:12px;">'
-                            f'Competitor Signal</div>'
                             f'<table class="scoring-table">'
                             f'<tr><td>Brand</td><td>{r.get("brand", "Unknown")}</td></tr>'
                             f'<tr><td>Category</td><td>{r.get("category", "N/A")}</td></tr>'
                             f'<tr><td>Price</td><td>{price_str}</td></tr>'
                             f'<tr><td>Rating</td><td>{rating_str}</td></tr>'
                             f'<tr><td>Reviews</td><td>{reviews_str}</td></tr>'
-                            f'<tr><td>Signal</td><td>{signal_badge(sig)}</td></tr>'
+                            f'<tr><td>Signal</td><td>{signal_badge(r.get("signal", ""))}</td></tr>'
                             f'<tr><td>Score</td><td><strong>{r["score"]}</strong> / 30</td></tr>'
                             f'<tr><td>Carried By</td><td>{source_tags(sources)}</td></tr>'
                             f'</table>',
                             unsafe_allow_html=True,
                         )
-                        if r.get("url"):
-                            st.markdown(
-                                f'<a href="{r["url"]}" target="_blank" style="font-size:12px; '
-                                f'color:#059669; text-decoration:none; font-weight:500;">'
-                                f'View at competitor &rarr;</a>',
-                                unsafe_allow_html=True,
-                            )
 
                     with dcol2:
-                        similar = find_similar_ace_products(
-                            r["name"], r.get("brand", ""), r.get("category", ""), ace_products
-                        )
+                        # Find similar Jerry's products
+                        comp_brand = r.get("brand", "").lower()
+                        comp_name = r.get("name", "").lower()
+                        similar = []
+                        for p in ace_products:
+                            ace_name = p.get("name", "").lower()
+                            words = set(comp_name.split()) - {"the", "a", "an", "and", "or", "for", "with", "in", "of", "to"}
+                            ace_words = set(ace_name.split()) - {"the", "a", "an", "and", "or", "for", "with", "in", "of", "to"}
+                            overlap = len(words & ace_words)
+                            if overlap >= 2:
+                                similar.append((p, overlap))
+                        similar.sort(key=lambda x: x[1], reverse=True)
+                        similar = [s[0] for s in similar[:5]]
+
                         st.markdown(
-                            '<div style="font-size:13px; font-weight:600; color:#111827; margin-bottom:12px;">'
+                            "<div style='font-size:13px; font-weight:600; color:#111827; margin-bottom:12px;'>"
                             "Jerry's Closest Products</div>",
                             unsafe_allow_html=True,
                         )
                         if similar:
-                            st.markdown(
-                                '<div style="font-size:12px; color:#6b7280; margin-bottom:8px;">'
-                                "These are the closest items Jerry's currently stocks. "
-                                "None are an exact match for this competitor product.</div>",
-                                unsafe_allow_html=True,
-                            )
                             for sp in similar:
                                 sp_price = f"${sp['price']:.2f}" if sp.get("price") else "N/A"
                                 st.markdown(
                                     f'<div style="padding:8px 12px; background:#f9fafb; border-radius:6px; '
                                     f'margin-bottom:6px; font-size:13px;">'
-                                    f'<div style="font-weight:500; color:#111827;">{sp["name"][:65]}</div>'
+                                    f'<div style="font-weight:500;">{sp["name"][:65]}</div>'
                                     f'<div style="font-size:12px; color:#9ca3af; margin-top:2px;">'
-                                    f'Price: {sp_price}</div>'
+                                    f'{sp.get("brand", "")} | {sp_price}</div>'
                                     f'</div>',
                                     unsafe_allow_html=True,
                                 )
                         else:
                             st.markdown(
-                                '<div style="padding:16px; background:#fef2f2; border-radius:8px; '
-                                'text-align:center;">'
+                                '<div style="padding:16px; background:#fef2f2; border-radius:8px; text-align:center;">'
                                 '<div style="font-size:14px; font-weight:600; color:#991b1b; margin-bottom:4px;">'
                                 'Gap Confirmed</div>'
                                 '<div style="font-size:12px; color:#6b7280;">'
-                                "Jerry's carries no similar products in this space. "
-                                "This is a clear assortment gap.</div>"
+                                "Jerry's carries no similar products in this space.</div>"
                                 '</div>',
                                 unsafe_allow_html=True,
                             )
-
-
-
-        st.markdown("<div style='height: 16px;'></div>", unsafe_allow_html=True)
 
         with st.expander("How scores are calculated"):
             st.markdown(
@@ -1009,16 +976,24 @@ with tab1:
                 "<tr><td>500+ customer reviews</td><td>+3</td></tr>"
                 "<tr><td>Has listed price</td><td>+1</td></tr>"
                 "<tr><td>Each additional competitor carrying it</td><td>+3</td></tr>"
-                "</table>"
-                '<div style="margin-top:10px; font-size:12px; color:var(--text-tertiary);">'
-                "Products are de-duplicated across competitors. Higher scores indicate stronger "
-                "competitive signals — products that multiple big-box retailers are actively pushing."
-                "</div>",
+                "</table>",
                 unsafe_allow_html=True,
             )
 
-# --- Tab 2: Competitor Catalog ---
-with tab2:
+        st.markdown("<div style='height: 12px;'></div>", unsafe_allow_html=True)
+        pdf_bytes = generate_gaps_pdf(
+            recommendations, len(gaps), num_competitors, date_display, selected_cat
+        )
+        st.download_button(
+            label="Download PDF",
+            data=pdf_bytes,
+            file_name=f"gaps_recommendations_{datetime.now().strftime('%Y%m%d')}.pdf",
+            mime="application/pdf",
+        )
+
+
+# --- Tab 3: Competitor Catalog ---
+with tab3:
     search_term = st.text_input(
         "Search",
         placeholder="Search products, brands, sources...",
@@ -1066,98 +1041,178 @@ with tab2:
         },
     )
 
-# --- Tab 3: Changes (Month-over-Month) ---
-with tab3:
+    # Price comparison by retailer
+    st.markdown("**Average Price by Retailer**")
+    price_rows = []
+    for src in all_sources:
+        src_items = [p for p in competitors if p["source"] == src and p.get("price")]
+        if src_items:
+            prices = [p["price"] for p in src_items]
+            price_rows.append({
+                "Retailer": src,
+                "Products": len(src_items),
+                "Avg Price": sum(prices) / len(prices),
+                "Min": min(prices),
+                "Max": max(prices),
+            })
+    # Add Jerry's
+    jerry_prices = jf["price"].dropna()
+    if not jerry_prices.empty:
+        price_rows.insert(0, {
+            "Retailer": "Jerry's Ace #17892",
+            "Products": len(jf),
+            "Avg Price": jerry_prices.mean(),
+            "Min": jerry_prices.min(),
+            "Max": jerry_prices.max(),
+        })
+
+    st.dataframe(
+        pd.DataFrame(price_rows),
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            "Avg Price": st.column_config.NumberColumn(format="$%.2f"),
+            "Min": st.column_config.NumberColumn(format="$%.2f"),
+            "Max": st.column_config.NumberColumn(format="$%.2f"),
+        },
+    )
+
+
+# --- Tab 4: Changes ---
+with tab4:
     if not diff_data:
         st.markdown(
             '<div class="empty-state">'
-            '<div class="empty-state-icon" style="font-size:32px; color:#9ca3af;">--</div>'
             '<div class="empty-state-title">No comparison data yet</div>'
             '<div class="empty-state-desc">'
             "Run the scraper again next month to see month-over-month changes: "
-            "new products at competitors, removed items, and price movements. "
-            "This is where the mystery-shopper model shines — tracking what's "
-            "changing on competitors' shelves over time."
+            "new products at competitors, removed items, and price movements."
             '</div></div>',
             unsafe_allow_html=True,
         )
     else:
-        # MoM metric cards
         new_items = diff_data.get("new_items", [])
         removed_items = diff_data.get("removed_items", [])
         price_changes = diff_data.get("price_changes", [])
 
         mcol1, mcol2, mcol3 = st.columns(3)
         with mcol1:
-            st.markdown(
-                f'<div class="mom-card">'
-                f'<div class="mom-card-value">{len(new_items)}</div>'
-                f'<div class="mom-card-label">New Items</div>'
-                f'</div>',
-                unsafe_allow_html=True,
-            )
+            st.markdown(f'<div class="mom-card"><div class="mom-card-value">{len(new_items)}</div><div class="mom-card-label">New Items</div></div>', unsafe_allow_html=True)
         with mcol2:
-            st.markdown(
-                f'<div class="mom-card">'
-                f'<div class="mom-card-value">{len(removed_items)}</div>'
-                f'<div class="mom-card-label">Removed Items</div>'
-                f'</div>',
-                unsafe_allow_html=True,
-            )
+            st.markdown(f'<div class="mom-card"><div class="mom-card-value">{len(removed_items)}</div><div class="mom-card-label">Removed</div></div>', unsafe_allow_html=True)
         with mcol3:
-            st.markdown(
-                f'<div class="mom-card">'
-                f'<div class="mom-card-value">{len(price_changes)}</div>'
-                f'<div class="mom-card-label">Price Changes</div>'
-                f'</div>',
-                unsafe_allow_html=True,
-            )
-
-        st.markdown("<div style='height: 16px;'></div>", unsafe_allow_html=True)
+            st.markdown(f'<div class="mom-card"><div class="mom-card-value">{len(price_changes)}</div><div class="mom-card-label">Price Changes</div></div>', unsafe_allow_html=True)
 
         if new_items:
-            st.markdown(
-                '<div style="font-size:14px; font-weight:600; color:#111827; margin-bottom:12px;">'
-                'New at Competitors</div>',
-                unsafe_allow_html=True,
-            )
+            st.markdown("**New at Competitors**")
             df_new = pd.DataFrame([{
-                "Source": i["source"],
-                "Name": i["name"][:80],
-                "Brand": i.get("brand", ""),
+                "Source": i["source"], "Name": i["name"][:80], "Brand": i.get("brand", ""),
                 "Price": round(i["price"], 2) if i.get("price") else None,
-                "Signal": i.get("signal", "").replace("_", " ").title() or "\u2014",
             } for i in new_items[:50]])
-            st.dataframe(
-                df_new,
-                use_container_width=True,
-                hide_index=True,
-                column_config={
-                    "Name": st.column_config.TextColumn(width="large"),
-                    "Price": st.column_config.NumberColumn(format="$%.2f"),
-                },
-            )
+            st.dataframe(df_new, use_container_width=True, hide_index=True,
+                         column_config={"Price": st.column_config.NumberColumn(format="$%.2f")})
 
         if price_changes:
-            st.markdown(
-                '<div style="font-size:14px; font-weight:600; color:#111827; margin:20px 0 12px;">'
-                'Price Movements (5%+)</div>',
-                unsafe_allow_html=True,
-            )
+            st.markdown("**Price Movements (5%+)**")
             df_price = pd.DataFrame([{
-                "Source": i["source"],
-                "Name": i["name"][:60],
+                "Source": i["source"], "Name": i["name"][:60],
                 "Old Price": round(i["previous_price"], 2) if i.get("previous_price") else None,
                 "New Price": round(i["price"], 2) if i.get("price") else None,
                 "Change": f"{i['price_change_pct']:+.1f}%",
             } for i in price_changes[:50]])
-            st.dataframe(
-                df_price,
-                use_container_width=True,
-                hide_index=True,
-                column_config={
-                    "Name": st.column_config.TextColumn(width="large"),
-                    "Old Price": st.column_config.NumberColumn(format="$%.2f"),
-                    "New Price": st.column_config.NumberColumn(format="$%.2f"),
-                },
-            )
+            st.dataframe(df_price, use_container_width=True, hide_index=True,
+                         column_config={
+                             "Old Price": st.column_config.NumberColumn(format="$%.2f"),
+                             "New Price": st.column_config.NumberColumn(format="$%.2f"),
+                         })
+
+
+# --- Tab 5: Scraped Data ---
+with tab5:
+    if serpapi_df.empty:
+        st.markdown(
+            '<div class="empty-state">'
+            '<div class="empty-state-title">No scraped data yet</div>'
+            '<div class="empty-state-desc">'
+            'Click <strong>Re-run Scrapers</strong> in the sidebar to scrape all stores.'
+            '</div></div>',
+            unsafe_allow_html=True,
+        )
+    else:
+        # Store breakdown stats
+        store_counts = serpapi_df["Source"].value_counts()
+        st.markdown(
+            f'<div class="summary-text">'
+            f'<strong>{len(serpapi_df):,} products</strong> scraped across '
+            f'<strong>{serpapi_df["Source"].nunique()} sources</strong> via SerpAPI.'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+
+        # Stat cards per store
+        store_cols = st.columns(len(store_counts))
+        for col, (store, count) in zip(store_cols, store_counts.items()):
+            with col:
+                st.markdown(stat_card(store, f"{count:,}"), unsafe_allow_html=True)
+
+        st.markdown("<div style='height:16px;'></div>", unsafe_allow_html=True)
+
+        # Filter by store
+        store_filter = st.selectbox(
+            "Filter by store",
+            ["All"] + sorted(serpapi_df["Source"].unique().tolist()),
+            key="serpapi_store_filter",
+        )
+
+        filtered = serpapi_df.copy()
+        if store_filter != "All":
+            filtered = filtered[filtered["Source"] == store_filter]
+
+        # Search
+        search = st.text_input(
+            "Search products",
+            placeholder="Search by name...",
+            key="serpapi_search",
+            label_visibility="collapsed",
+        )
+        if search:
+            filtered = filtered[filtered["Name"].str.contains(search, case=False, na=False)]
+
+        st.markdown(
+            f'<div class="result-count">Showing <strong>{len(filtered):,}</strong> products</div>',
+            unsafe_allow_html=True,
+        )
+
+        st.dataframe(
+            filtered[["Source", "Name", "Price", "Rating", "Reviews"]],
+            use_container_width=True,
+            hide_index=True,
+            height=560,
+            column_config={
+                "Name": st.column_config.TextColumn("Product", width="large"),
+                "Price": st.column_config.NumberColumn("Price", format="$%.2f"),
+                "Rating": st.column_config.NumberColumn("Rating", format="%.1f"),
+                "Reviews": st.column_config.NumberColumn("Reviews", format="%d"),
+            },
+        )
+
+        # Price comparison
+        st.markdown("**Average Price by Store**")
+        price_summary = (
+            filtered[filtered["Price"].notna()]
+            .groupby("Source")["Price"]
+            .agg(["count", "mean", "min", "max"])
+            .reset_index()
+            .rename(columns={"Source": "Store", "count": "Products", "mean": "Avg Price", "min": "Min", "max": "Max"})
+            .sort_values("Products", ascending=False)
+        )
+        st.dataframe(
+            price_summary,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "Avg Price": st.column_config.NumberColumn(format="$%.2f"),
+                "Min": st.column_config.NumberColumn(format="$%.2f"),
+                "Max": st.column_config.NumberColumn(format="$%.2f"),
+            },
+        )
