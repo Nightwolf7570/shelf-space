@@ -86,35 +86,38 @@ def find_gaps(ace_products, competitor_products):
     return gaps
 
 
-def rank_recommendations(gaps, max_items=30):
+def rank_recommendations(gaps, max_items=100, balance_sources=False):
     """
     Score and rank gap products. Returns top N recommendations.
 
     Scoring:
-    - bestseller signal: +10
-    - high_rated signal: +5
+    - bestseller signal: +5
+    - high_rated signal: +4
     - rating >= 4.0: +3
     - reviews >= 100: +2
-    - reviews >= 500: +3 more
-    - has price (not None): +1
+    - reviews >= 500: +2 more
+    - has price (not None): +2
     - each additional competitor source: +3
+
+    Results are returned in score-descending order by default. Source balancing
+    can be enabled by passing balance_sources=True.
     """
     scored = []
     for g in gaps:
         score = 0
         if g.get("signal") == "bestseller":
-            score += 10
-        elif g.get("signal") == "high_rated":
             score += 5
+        elif g.get("signal") == "high_rated":
+            score += 4
         if g.get("rating") and g["rating"] >= 4.0:
             score += 3
         if g.get("reviews"):
             if g["reviews"] >= 100:
                 score += 2
             if g["reviews"] >= 500:
-                score += 3
+                score += 2
         if g.get("price"):
-            score += 1
+            score += 2
 
         scored.append({**g, "score": score})
 
@@ -132,12 +135,45 @@ def rank_recommendations(gaps, max_items=30):
         else:
             merged[key] = {**item, "sources": [item["source"]]}
 
-    # Re-score by number of competitor sources
+    # Re-score by number of additional competitor sources.
     for m in merged.values():
-        m["score"] += len(m["sources"]) * 3
+        m["score"] += max(0, len(m["sources"]) - 1) * 3
 
     ranked = sorted(merged.values(), key=lambda x: x["score"], reverse=True)
-    return ranked[:max_items]
+    if not balance_sources:
+        return ranked[:max_items]
+
+    return _balance_by_source(ranked, max_items)
+
+
+def _balance_by_source(items, max_items):
+    """Interleave ranked items by source so one data-rich store cannot dominate."""
+    buckets = {}
+    source_order = []
+    for item in items:
+        source = item.get("source") or (item.get("sources") or [""])[0]
+        if source not in buckets:
+            buckets[source] = []
+            source_order.append(source)
+        buckets[source].append(item)
+
+    # Start each round with the source whose next item has the strongest score.
+    balanced = []
+    seen_keys = set()
+    while len(balanced) < max_items and any(buckets.values()):
+        active_sources = [s for s in source_order if buckets[s]]
+        active_sources.sort(key=lambda s: buckets[s][0]["score"], reverse=True)
+        for source in active_sources:
+            if len(balanced) >= max_items:
+                break
+            item = buckets[source].pop(0)
+            key = item["name"].lower()[:50]
+            if key in seen_keys:
+                continue
+            seen_keys.add(key)
+            balanced.append(item)
+
+    return balanced
 
 
 def diff_snapshots(current_competitors, previous_competitors):

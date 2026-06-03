@@ -40,33 +40,43 @@ def _extract_brand_from_title(title):
 
 
 def normalize_home_depot(products, category="", search_term=""):
-    """Normalize SerpAPI Home Depot native results."""
+    """Normalize Apify rigelbytes/homedepot-scraper results (GraphQL format)."""
     now = datetime.now(timezone.utc).isoformat()
     results = []
     for p in products:
-        badges = p.get("badges", [])
-        signal = ""
-        if isinstance(badges, list):
-            for b in badges:
-                if isinstance(b, str) and "bestseller" in b.lower():
-                    signal = "bestseller"
-                    break
+        identifiers = p.get("identifiers", {})
+        pricing = p.get("pricing", {})
+        reviews_data = p.get("reviews", {}).get("ratingsReviews", {})
+        badges = p.get("badges") or []
 
-        rating = p.get("rating")
-        reviews = p.get("reviews")
-        if not signal and rating and float(rating) >= 4.5 and reviews and int(reviews) >= 500:
+        name = _clean_name(identifiers.get("productLabel", ""))
+        brand = identifiers.get("brandName", "") or _extract_brand_from_title(name)
+        rating = reviews_data.get("averageRating")
+        review_count = reviews_data.get("totalReviews")
+
+        # Detect bestseller badge
+        signal = ""
+        for b in badges:
+            label = (b.get("label") or b.get("name") or "").lower()
+            if "best seller" in label or "bestseller" in label:
+                signal = "bestseller"
+                break
+        if not signal and rating and float(rating) >= 4.5 and review_count and int(review_count) >= 500:
             signal = "high_rated"
+
+        canonical = identifiers.get("canonicalUrl", "")
+        url = f"https://www.homedepot.com{canonical}" if canonical else ""
 
         results.append({
             "source": "Home Depot",
-            "name": _clean_name(p.get("title", "")),
-            "brand": p.get("brand", "") or _extract_brand_from_title(p.get("title", "")),
-            "price": _parse_price(p.get("price")),
-            "rating": float(rating) if rating else None,
-            "reviews": int(reviews) if reviews else None,
+            "name": name,
+            "brand": brand,
+            "price": _parse_price(pricing.get("value")),
+            "rating": round(float(rating), 2) if rating else None,
+            "reviews": int(review_count) if review_count else None,
             "category": category,
             "search_term": search_term,
-            "url": p.get("link", ""),
+            "url": url,
             "signal": signal,
             "scraped_at": now,
         })
@@ -74,34 +84,29 @@ def normalize_home_depot(products, category="", search_term=""):
 
 
 def normalize_target(products, category="", search_term=""):
-    """Normalize Target Redsky API results."""
+    """Normalize Apify automation-lab/target-scraper results."""
     now = datetime.now(timezone.utc).isoformat()
     results = []
     for p in products:
-        item = p.get("item", {})
-        price_data = p.get("price", {})
-        desc = item.get("product_description", {})
-        brand_info = item.get("primary_brand", {})
-        ratings = item.get("ratings_and_reviews", {}).get("statistics", {})
+        rating = p.get("rating")
+        review_count = p.get("reviewCount")
 
-        buy_url = item.get("enrichment", {}).get("buy_url", "")
-        url = f"https://www.target.com{buy_url}" if buy_url and not buy_url.startswith("http") else buy_url
-
-        rating_val = ratings.get("rating", {}).get("average")
-        review_count = ratings.get("review_count", 0)
+        signal = ""
+        if rating and float(rating) >= 4.5 and review_count and int(review_count) >= 500:
+            signal = "high_rated"
 
         results.append({
             "source": "Target",
-            "name": _clean_name(desc.get("title", "")),
-            "brand": brand_info.get("name", ""),
-            "price": _parse_price(price_data.get("formatted_current_price")),
-            "rating": float(rating_val) if rating_val else None,
+            "name": _clean_name(p.get("title", "")),
+            "brand": p.get("brand", ""),
+            "price": _parse_price(p.get("price")),
+            "rating": round(float(rating), 2) if rating else None,
             "reviews": int(review_count) if review_count else None,
             "category": category,
             "search_term": search_term,
-            "url": url,
-            "signal": "",
-            "scraped_at": now,
+            "url": p.get("url", ""),
+            "signal": signal,
+            "scraped_at": p.get("scrapedAt", now),
         })
     return results
 
@@ -148,29 +153,29 @@ def normalize_walmart(products, category="", search_term=""):
 
 
 def normalize_lowes(products, category="", search_term=""):
-    """Normalize SerpAPI Google Shopping results for Lowe's."""
+    """Normalize Apify automation-lab/google-shopping-scraper results for Lowe's."""
     now = datetime.now(timezone.utc).isoformat()
     results = []
     for p in products:
         title = p.get("title", "")
         rating = p.get("rating")
-        reviews = p.get("reviews")
+        review_count = p.get("reviewCount")
         signal = ""
-        if rating and float(rating) >= 4.5 and reviews and int(reviews) >= 500:
+        if rating and float(rating) >= 4.5 and review_count and int(review_count) >= 500:
             signal = "high_rated"
 
         results.append({
             "source": "Lowes",
             "name": _clean_name(title),
             "brand": _extract_brand_from_title(title),
-            "price": _parse_price(p.get("extracted_price")),
-            "rating": float(rating) if rating else None,
-            "reviews": int(reviews) if reviews else None,
+            "price": _parse_price(p.get("priceNumeric") or p.get("price")),
+            "rating": round(float(rating), 2) if rating else None,
+            "reviews": int(review_count) if review_count else None,
             "category": category,
             "search_term": search_term,
-            "url": p.get("product_link", ""),
+            "url": p.get("productUrl", ""),
             "signal": signal,
-            "scraped_at": now,
+            "scraped_at": p.get("scrapedAt", now),
         })
     return results
 

@@ -303,7 +303,7 @@ def generate_gaps_pdf(recs: list, gaps_count: int, num_comp: int, snap_dt: str, 
     # Summary line
     story.append(Paragraph(
         f"Found <b>{gaps_count:,} gaps</b> across <b>{num_comp} competitors</b>. "
-        f"Top <b>{len(recs)}</b> products ranked by competitive signal strength.",
+        f"Top <b>{len(recs)}</b> products ranked by score descending.",
         ParagraphStyle("summary", parent=styles["Normal"], fontSize=10, fontName="Helvetica",
                        textColor=colors.HexColor("#374151"), spaceAfter=14),
     ))
@@ -361,13 +361,14 @@ def generate_gaps_pdf(recs: list, gaps_count: int, num_comp: int, snap_dt: str, 
     story.append(Spacer(1, 20))
     story.append(Paragraph("Scoring Guide", section_style))
     scoring_rows = [
-        ["Bestseller badge at competitor", "+10"],
-        ["High Rated badge at competitor", "+5"],
+        ["Bestseller badge at competitor", "+5"],
+        ["High Rated badge at competitor", "+4"],
         ["Customer rating 4.0+", "+3"],
         ["100+ customer reviews", "+2"],
-        ["500+ customer reviews", "+3"],
-        ["Has listed price", "+1"],
+        ["500+ customer reviews", "+2"],
+        ["Has listed price", "+2"],
         ["Each additional competitor carrying it", "+3"],
+        ["Final ordering", "Score descending"],
     ]
     score_tbl = Table(scoring_rows, colWidths=[4.5 * inch, 0.6 * inch])
     score_tbl.setStyle(TableStyle([
@@ -484,7 +485,20 @@ def load_jerrys_md():
 
 
 @st.cache_data
-def load_snapshot(snapshot_dir="data/snapshots"):
+def list_snapshot_dates(snapshot_dir="data/snapshots"):
+    snap_dir = Path(snapshot_dir)
+    if not snap_dir.exists():
+        return []
+
+    comp_files = sorted(snap_dir.glob("*_competitors.json"))
+    if not comp_files:
+        return []
+
+    return [p.stem.split("_")[0] for p in comp_files]
+
+
+@st.cache_data
+def load_snapshot(snapshot_date=None, snapshot_dir="data/snapshots"):
     snap_dir = Path(snapshot_dir)
     if not snap_dir.exists():
         return None, None
@@ -493,19 +507,30 @@ def load_snapshot(snapshot_dir="data/snapshots"):
     if not comp_files:
         return None, None
 
-    latest_comp = comp_files[-1]
-    snap_date = latest_comp.stem.split("_")[0]
+    if snapshot_date:
+        selected_comp = snap_dir / f"{snapshot_date}_competitors.json"
+        if not selected_comp.exists():
+            selected_comp = comp_files[-1]
+    else:
+        selected_comp = comp_files[-1]
+    snap_date = selected_comp.stem.split("_")[0]
 
-    with open(latest_comp) as f:
+    with open(selected_comp) as f:
         competitors = json.load(f)
 
     return competitors, snap_date
 
 
 @st.cache_data
-def load_diff(diff_dir="data/diffs"):
+def load_diff(snapshot_date=None, diff_dir="data/diffs"):
     d = Path(diff_dir)
     if not d.exists():
+        return None
+    if snapshot_date:
+        selected_diff = d / f"{snapshot_date}_diff.json"
+        if selected_diff.exists():
+            with open(selected_diff) as f:
+                return json.load(f)
         return None
     diffs = sorted(d.glob("*_diff.json"))
     if not diffs:
@@ -607,35 +632,18 @@ def load_serpapi_data():
 
 
 # --- Load data ---
-jerrys_df, ace_products = load_jerrys_md()
-competitors, snap_date = load_snapshot()
-serpapi_df = load_serpapi_data()
+snapshot_dates = list_snapshot_dates()
+latest_snapshot_date = snapshot_dates[-1] if snapshot_dates else None
+previous_snapshot_date = snapshot_dates[-2] if len(snapshot_dates) >= 2 else None
 
+if latest_snapshot_date and st.session_state.get("selected_snapshot_date") not in snapshot_dates:
+    st.session_state["selected_snapshot_date"] = latest_snapshot_date
+
+selected_snapshot_date = st.session_state.get("selected_snapshot_date")
+jerrys_df, ace_products = load_jerrys_md()
+competitors, snap_date = load_snapshot(selected_snapshot_date)
 has_jerrys = not jerrys_df.empty
 has_snapshot = bool(competitors)
-has_serpapi = not serpapi_df.empty
-
-# If no snapshot but we have SerpAPI data, build competitors from it
-if not has_snapshot and has_serpapi:
-    competitors = []
-    for _, row in serpapi_df.iterrows():
-        source = row.get("Source", "")
-        if "(Native)" in source:
-            source = source.replace(" (Native)", "")
-        competitors.append({
-            "source": source,
-            "name": row.get("Name", ""),
-            "brand": "",
-            "price": row.get("Price"),
-            "rating": row.get("Rating"),
-            "reviews": row.get("Reviews"),
-            "category": "paint",
-            "search_term": "serpapi",
-            "url": row.get("Link", ""),
-            "signal": "",
-        })
-    snap_date = datetime.now().strftime("%Y-%m-%d")
-    has_snapshot = True
 
 # --- Analysis ---
 if has_jerrys and has_snapshot:
@@ -645,7 +653,7 @@ else:
     gaps = []
     recommendations = []
 
-diff_data = load_diff()
+diff_data = load_diff(snap_date)
 
 if snap_date:
     try:
@@ -688,14 +696,38 @@ with st.sidebar:
 
     st.markdown("---")
 
-    serpapi_count = len(serpapi_df) if has_serpapi else 0
+    if snapshot_dates:
+        st.markdown('<div class="sidebar-section-label">Run Version</div>', unsafe_allow_html=True)
+        selected_index = snapshot_dates.index(snap_date) if snap_date in snapshot_dates else len(snapshot_dates) - 1
+        selected_run = st.selectbox(
+            "Snapshot run",
+            options=snapshot_dates,
+            index=selected_index,
+            format_func=lambda d: f"{d} (latest)" if d == latest_snapshot_date else d,
+            label_visibility="collapsed",
+            key="snapshot_run_selector",
+        )
+        if selected_run != st.session_state.get("selected_snapshot_date"):
+            st.session_state["selected_snapshot_date"] = selected_run
+            st.rerun()
+
+        if previous_snapshot_date and snap_date == latest_snapshot_date:
+            if st.button("Use Previous Run", use_container_width=True):
+                st.session_state["selected_snapshot_date"] = previous_snapshot_date
+                st.rerun()
+        elif latest_snapshot_date and snap_date != latest_snapshot_date:
+            if st.button("Use Latest Run", use_container_width=True):
+                st.session_state["selected_snapshot_date"] = latest_snapshot_date
+                st.rerun()
+
+        st.markdown("---")
+
     snapshot_count = len(competitors) if competitors else 0
     st.markdown(
         f'<div class="sidebar-section-label">Snapshot</div>'
         f'<div class="sidebar-stat">'
         f"{date_display}<br>"
         f"{snapshot_count:,} competitor products<br>"
-        f"{serpapi_count:,} scraped products<br>"
         f"{len(ace_products):,} Jerry's verified products<br>"
         f"{len(jerry_categories)} categories<br>"
         f"{num_competitors} competitors tracked"
@@ -705,19 +737,58 @@ with st.sidebar:
 
     st.markdown("---")
 
+    st.markdown('<div class="sidebar-section-label">Scraper Settings</div>', unsafe_allow_html=True)
+
+    from config import CATEGORIES as _ALL_CATEGORIES
+    available_cats = list(_ALL_CATEGORIES.keys())
+    scrape_categories = st.multiselect(
+        "Categories to scrape",
+        options=available_cats,
+        default=available_cats,
+        key="scrape_cats",
+    )
+
+    max_budget = st.number_input(
+        "Apify budget ($)",
+        min_value=1,
+        max_value=100,
+        value=5,
+        step=1,
+        help="Max Apify spend for this scrape run. Actors are aborted if budget is exceeded.",
+        key="max_budget",
+    )
+
+    max_total = st.number_input(
+        "Max total products",
+        min_value=10,
+        max_value=2000,
+        value=400,
+        step=50,
+        help="Target total products across all stores. Divided evenly across stores and search terms.",
+        key="max_total",
+    )
+
+    st.markdown("---")
+
     st.markdown('<div class="sidebar-section-label">Actions</div>', unsafe_allow_html=True)
     if st.button("Re-run Scrapers", use_container_width=True):
-        with st.spinner("Running all scrapers (SerpAPI + Apify + Direct APIs)..."):
+        cmd = ["python3", "-u", "run_snapshot.py"]
+        if scrape_categories and set(scrape_categories) != set(available_cats):
+            cmd += ["--categories"] + scrape_categories
+        cmd += ["--max-results", str(max_total)]
+        cmd += ["--budget", str(max_budget)]
+        with st.spinner("Running scrapers (Apify + Direct APIs)... This takes ~2 min."):
             result = subprocess.run(
-                ["python3", "-u", "scrape_all.py"],
+                cmd,
                 capture_output=True, text=True, timeout=1200,
                 cwd=str(Path(__file__).parent),
             )
         if result.returncode == 0:
-            st.success(f"Scrape complete! Refreshing data & analysis...")
+            st.success("Scrape complete! Refreshing data & analysis...")
             with st.expander("Scraper output"):
                 st.code(result.stdout, language="text")
             st.cache_data.clear()
+            st.session_state.pop("selected_snapshot_date", None)
             st.rerun()
         else:
             st.error("Scraper failed!")
@@ -755,20 +826,15 @@ with col3:
 with col4:
     st.markdown(stat_card("Gaps Found", f"{len(gaps):,}"), unsafe_allow_html=True)
 with col5:
-    scraped_total = len(serpapi_df) if has_serpapi else 0
+    scraped_total = len(competitors) if has_snapshot else 0
     st.markdown(stat_card("Scraped Products", f"{scraped_total:,}"), unsafe_allow_html=True)
 
 # --- Sources bar ---
 all_sources = sorted(set(p["source"] for p in competitors)) if competitors else []
-if has_serpapi:
-    serpapi_sources = sorted(serpapi_df["Source"].unique())
-    all_sources = sorted(set(all_sources) | set(s.replace(" (Native)", "") for s in serpapi_sources))
 source_chips = []
 for s in all_sources:
     color = SOURCE_COLORS.get(s, "#9ca3af")
     count = sum(1 for p in (competitors or []) if p.get("source") == s)
-    if has_serpapi:
-        count += len(serpapi_df[serpapi_df["Source"].str.contains(s, na=False)])
     source_chips.append(
         f'<span class="source-chip">'
         f'<span class="source-chip-dot" style="background:{color};"></span>'
@@ -878,7 +944,7 @@ with tab2:
             f'Found <strong>{len(gaps):,} gaps</strong> across '
             f'<strong>{num_competitors} competitors</strong>. '
             f'Top <strong>{len(recommendations)}</strong> products '
-            f"Jerry's should consider stocking, ranked by competitive signal strength."
+            f"Jerry's should consider stocking, ranked by score descending."
             f'</div>',
             unsafe_allow_html=True,
         )
@@ -969,13 +1035,14 @@ with tab2:
         with st.expander("How scores are calculated"):
             st.markdown(
                 '<table class="scoring-table">'
-                "<tr><td>Bestseller badge at competitor</td><td>+10</td></tr>"
-                "<tr><td>High Rated badge at competitor</td><td>+5</td></tr>"
+                "<tr><td>Bestseller badge at competitor</td><td>+5</td></tr>"
+                "<tr><td>High Rated badge at competitor</td><td>+4</td></tr>"
                 "<tr><td>Customer rating 4.0+</td><td>+3</td></tr>"
                 "<tr><td>100+ customer reviews</td><td>+2</td></tr>"
-                "<tr><td>500+ customer reviews</td><td>+3</td></tr>"
-                "<tr><td>Has listed price</td><td>+1</td></tr>"
+                "<tr><td>500+ customer reviews</td><td>+2</td></tr>"
+                "<tr><td>Has listed price</td><td>+2</td></tr>"
                 "<tr><td>Each additional competitor carrying it</td><td>+3</td></tr>"
+                "<tr><td>Final ordering</td><td>Score descending</td></tr>"
                 "</table>",
                 unsafe_allow_html=True,
             )
@@ -1129,7 +1196,7 @@ with tab4:
 
 # --- Tab 5: Scraped Data ---
 with tab5:
-    if serpapi_df.empty:
+    if not has_snapshot:
         st.markdown(
             '<div class="empty-state">'
             '<div class="empty-state-title">No scraped data yet</div>'
@@ -1139,18 +1206,29 @@ with tab5:
             unsafe_allow_html=True,
         )
     else:
+        scraped_df = pd.DataFrame([{
+            "Source": p.get("source", ""),
+            "Name": str(p.get("name", ""))[:100],
+            "Price": p.get("price"),
+            "Rating": float(p["rating"]) if p.get("rating") else None,
+            "Reviews": int(p["reviews"]) if p.get("reviews") else None,
+            "Brand": p.get("brand", ""),
+            "Signal": p.get("signal", ""),
+            "Search Term": p.get("search_term", ""),
+        } for p in competitors if p.get("name")])
+
         # Store breakdown stats
-        store_counts = serpapi_df["Source"].value_counts()
+        store_counts = scraped_df["Source"].value_counts()
         st.markdown(
             f'<div class="summary-text">'
-            f'<strong>{len(serpapi_df):,} products</strong> scraped across '
-            f'<strong>{serpapi_df["Source"].nunique()} sources</strong> via SerpAPI.'
+            f'<strong>{len(scraped_df):,} products</strong> scraped across '
+            f'<strong>{scraped_df["Source"].nunique()} sources</strong> via Apify.'
             f'</div>',
             unsafe_allow_html=True,
         )
 
         # Stat cards per store
-        store_cols = st.columns(len(store_counts))
+        store_cols = st.columns(min(len(store_counts), 5))
         for col, (store, count) in zip(store_cols, store_counts.items()):
             with col:
                 st.markdown(stat_card(store, f"{count:,}"), unsafe_allow_html=True)
@@ -1160,11 +1238,11 @@ with tab5:
         # Filter by store
         store_filter = st.selectbox(
             "Filter by store",
-            ["All"] + sorted(serpapi_df["Source"].unique().tolist()),
-            key="serpapi_store_filter",
+            ["All"] + sorted(scraped_df["Source"].unique().tolist()),
+            key="scraped_store_filter",
         )
 
-        filtered = serpapi_df.copy()
+        filtered = scraped_df.copy()
         if store_filter != "All":
             filtered = filtered[filtered["Source"] == store_filter]
 
@@ -1172,7 +1250,7 @@ with tab5:
         search = st.text_input(
             "Search products",
             placeholder="Search by name...",
-            key="serpapi_search",
+            key="scraped_search",
             label_visibility="collapsed",
         )
         if search:
@@ -1184,7 +1262,7 @@ with tab5:
         )
 
         st.dataframe(
-            filtered[["Source", "Name", "Price", "Rating", "Reviews"]],
+            filtered[["Source", "Name", "Brand", "Price", "Rating", "Reviews", "Signal"]],
             use_container_width=True,
             hide_index=True,
             height=560,

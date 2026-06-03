@@ -10,25 +10,35 @@ Usage:
 import argparse
 import html
 import json
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date
+from math import ceil
 from pathlib import Path
 
 from config import CATEGORIES
 from scrapers import (
-    scrape_home_depot, scrape_target, scrape_walmart, scrape_lowes,
+    scrape_home_depot,
+    scrape_target_batch, scrape_lowes_batch,
     scrape_ace_catalog, load_ace_catalog_from_file,
+    set_budget,
 )
 from normalize import (
-    normalize_home_depot, normalize_target, normalize_walmart,
+    normalize_home_depot, normalize_target,
     normalize_lowes, normalize_ace,
 )
 from analyze import find_gaps, rank_recommendations, diff_snapshots
 
 SNAPSHOT_DIR = Path("data/snapshots")
 DIFF_DIR = Path("data/diffs")
+DEFAULT_HOME_DEPOT_QUOTA = 72
+DEFAULT_TARGET_QUOTA = 200
+DEFAULT_LOWES_REQUEST_QUOTA = 250
+DEFAULT_MAX_RESULTS = 400
+HOME_DEPOT_SHARE = DEFAULT_HOME_DEPOT_QUOTA / DEFAULT_MAX_RESULTS
 
 
-def run(categories=None, skip_scrape=False):
+def run(categories=None, skip_scrape=False, max_results=400, budget=5.0):
     SNAPSHOT_DIR.mkdir(parents=True, exist_ok=True)
     DIFF_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -43,48 +53,10 @@ def run(categories=None, skip_scrape=False):
     # --- Scrape competitors ---
     all_competitor_products = []
 
-    for cat_name in cats:
-        cat = CATEGORIES.get(cat_name)
-        if not cat:
-            print(f"  Unknown category: {cat_name}")
-            continue
-
-        print(f"\n--- Category: {cat_name} ---")
-
-        for term in cat["search_terms"]:
-            print(f"\n  Search: '{term}'")
-
-            if skip_scrape:
-                print("    (skipping scrape, using cached data)")
-                continue
-
-            # Home Depot
-            hd_raw = scrape_home_depot(term)
-            all_competitor_products.extend(
-                normalize_home_depot(hd_raw, category=cat_name, search_term=term)
-            )
-
-            # Target
-            tgt_raw = scrape_target(term)
-            all_competitor_products.extend(
-                normalize_target(tgt_raw, category=cat_name, search_term=term)
-            )
-
-            # Walmart
-            wm_raw = scrape_walmart(term)
-            all_competitor_products.extend(
-                normalize_walmart(wm_raw, category=cat_name, search_term=term)
-            )
-
-            # Lowe's
-            low_raw = scrape_lowes(term)
-            all_competitor_products.extend(
-                normalize_lowes(low_raw, category=cat_name, search_term=term)
-            )
-
     if skip_scrape:
-        # Load from existing output files
         all_competitor_products = _load_cached_data(cats)
+    else:
+        all_competitor_products = _scrape_parallel(cats, max_results=max_results, budget=budget)
 
     # --- Scrape/load Ace catalog ---
     print(f"\n--- Jerry's Ace Hardware Catalog ---")
@@ -154,6 +126,90 @@ def run(categories=None, skip_scrape=False):
     print(f"\n{'='*60}")
     print("Done!")
     print(f"{'='*60}")
+
+
+def _scrape_parallel(cats, max_results=400, budget=5.0):
+    """Scrape all competitors using batching + parallelism.
+
+    max_results is the approximate target snapshot size. Home Depot scales as
+    a share of the total target, Target requests about half the default target,
+    and Lowe's deliberately over-requests because Google Shopping includes
+    duplicate/non-Lowe's rows that get filtered out downstream.
+    budget is the max Apify spend in USD — passed to scrapers for enforcement.
+
+    - Target & Lowe's: batched (all search terms in one actor call each)
+    - Home Depot: one category call, scaled from the default 72/400 share
+    - All stores run concurrently via threads
+    """
+    all_products = []
+    t0 = time.time()
+    set_budget(budget)
+
+    for cat_name in cats:
+        cat = CATEGORIES.get(cat_name)
+        if not cat:
+            print(f"  Unknown category: {cat_name}")
+            continue
+
+        terms = cat["search_terms"]
+        scale = max_results / DEFAULT_MAX_RESULTS if max_results else 0
+        hd_quota = max(0, round(max_results * HOME_DEPOT_SHARE))
+        target_quota = max(0, round(DEFAULT_TARGET_QUOTA * scale))
+        lowes_quota = max(0, round(DEFAULT_LOWES_REQUEST_QUOTA * scale))
+        target_per_term = ceil(target_quota / len(terms)) if target_quota else 0
+        lowes_per_term = ceil(lowes_quota / len(terms)) if lowes_quota else 0
+
+        print(
+            f"\n--- Category: {cat_name} ({len(terms)} terms, target {max_results}: "
+            f"Home Depot {hd_quota}, Target request {target_quota}, Lowe's request {lowes_quota}) ---"
+        )
+
+        # Launch all scraping concurrently
+        with ThreadPoolExecutor(max_workers=3) as pool:
+            futures = {}
+
+            # Target — single batched call for all terms
+            if target_quota:
+                futures[pool.submit(scrape_target_batch, terms, target_per_term)] = ("target_batch", cat_name, target_quota)
+
+            # Lowe's — single batched call for all terms
+            if lowes_quota:
+                futures[pool.submit(scrape_lowes_batch, terms, lowes_per_term)] = ("lowes_batch", cat_name, lowes_quota)
+
+            # Home Depot — fixed 72-product category run.
+            if hd_quota:
+                hd_term = terms[0]
+                futures[pool.submit(scrape_home_depot, hd_term, hd_quota)] = ("hd", cat_name, hd_term, hd_quota)
+
+            # Collect results as they finish
+            for future in as_completed(futures):
+                tag = futures[future]
+                try:
+                    result = future.result()
+                except Exception as e:
+                    print(f"  ERROR in {tag[0]}: {e}")
+                    continue
+
+                if tag[0] == "target_batch":
+                    normalized = []
+                    for term, items in result.items():
+                        normalized.extend(normalize_target(items, category=tag[1], search_term=term))
+                    all_products.extend(normalized[:tag[2]])
+
+                elif tag[0] == "lowes_batch":
+                    normalized = []
+                    for term, items in result.items():
+                        normalized.extend(normalize_lowes(items, category=tag[1], search_term=term))
+                    all_products.extend(normalized[:tag[2]])
+
+                elif tag[0] == "hd":
+                    all_products.extend(
+                        normalize_home_depot(result, category=tag[1], search_term=tag[2])[:tag[3]]
+                    )
+
+    elapsed = round(time.time() - t0, 1)
+    print(f"\n  Scraped {len(all_products)} total products in {elapsed}s")
+    return all_products
 
 
 def _load_cached_data(cats):
@@ -251,5 +307,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="MysteryScraper snapshot runner")
     parser.add_argument("--categories", nargs="+", help="Categories to scrape")
     parser.add_argument("--skip-scrape", action="store_true", help="Use cached output/ data")
+    parser.add_argument("--max-results", type=int, default=400, help="Approximate target product count; Lowe's is over-requested before filtering")
+    parser.add_argument("--budget", type=float, default=5.0, help="Max Apify spend in USD")
     args = parser.parse_args()
-    run(categories=args.categories, skip_scrape=args.skip_scrape)
+    run(categories=args.categories, skip_scrape=args.skip_scrape, max_results=args.max_results, budget=args.budget)
