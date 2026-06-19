@@ -1,3 +1,4 @@
+{% from 'partials/_ai_badge.html' import ai_badge %}
 <button
   type="button"
   class="group text-left bg-white border border-slate-200 rounded-xl p-4 hover:border-slate-400 hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2 transition flex flex-col gap-3 min-h-[176px]"
@@ -8,9 +9,12 @@
 >
   <div class="flex items-start justify-between gap-3">
     <div class="text-xs font-semibold text-slate-500 tabular-nums leading-none">#{{ rank }}</div>
-    <span class="inline-flex items-center gap-1 bg-brand-50 text-brand-700 text-xs font-semibold px-2 py-0.5 rounded-full tabular-nums">
-      {{ r.score }}
-    </span>
+    <div class="flex items-center gap-1.5">
+      {{ ai_badge(r.ai_status) }}
+      <span class="inline-flex items-center gap-1 bg-brand-50 text-brand-700 text-xs font-semibold px-2 py-0.5 rounded-full tabular-nums">
+        {{ display_score(r) }}
+      </span>
+    </div>
   </div>
 
   <div class="flex-1">

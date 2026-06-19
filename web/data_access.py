@@ -8,20 +8,16 @@ all I/O and scoring lives here so it's easy to test and swap.
 from __future__ import annotations
 
 import json
-import re
 from datetime import datetime
 from functools import lru_cache
 from pathlib import Path
 
 from analyze import find_gaps, rank_recommendations
+import ai_backbone
 
 ROOT = Path(__file__).resolve().parent.parent
 SNAPSHOT_DIR = ROOT / "data" / "snapshots"
 DIFF_DIR = ROOT / "data" / "diffs"
-JERRYS_MD = Path(
-    "/Users/Welcome123/.superset/worktrees/MysteryScraper/"
-    "clarification-needed/output/ace/jerrys_paint_products.md"
-)
 
 STOPWORDS = {"the", "a", "an", "and", "or", "for", "with", "in", "of", "to"}
 
@@ -58,37 +54,34 @@ def load_competitors(date: str) -> list[dict]:
 
 @lru_cache(maxsize=1)
 def load_jerrys() -> list[dict]:
-    """Parse verified Jerry's inventory from the markdown export."""
-    if not JERRYS_MD.exists():
+    """Load Jerry's verified inventory from the most recent non-empty
+    ``*_ace_catalog.json`` snapshot.
+
+    Some scrape runs fail to capture the Ace catalog and write an empty file,
+    so we walk newest-first and use the first run that actually has data.
+    """
+    if not SNAPSHOT_DIR.exists():
         return []
 
-    rows: list[dict] = []
-    current_cat = ""
-    for line in JERRYS_MD.read_text().splitlines():
-        if line.startswith("## "):
-            m = re.match(r"## (.+?) \((\d+)\)", line)
-            if m:
-                current_cat = m.group(1)
-        if line.startswith("| ") and not line.startswith("| Brand") and not line.startswith("|---"):
-            parts = [c.strip() for c in line.split("|")[1:-1]]
-            if len(parts) < 4:
-                continue
-            try:
-                price = float(parts[2].replace("$", "").replace(",", ""))
-            except ValueError:
-                price = 0.0
-            try:
-                qty = int(parts[3])
-            except ValueError:
-                qty = 0
+    for path in sorted(SNAPSHOT_DIR.glob("*_ace_catalog.json"), reverse=True):
+        try:
+            with open(path) as f:
+                items = json.load(f)
+        except (json.JSONDecodeError, OSError):
+            continue
+        if not items:
+            continue
+        rows: list[dict] = []
+        for it in items:
             rows.append({
-                "name": parts[1],
-                "brand": parts[0],
-                "price": price,
-                "qty": qty,
-                "category": current_cat,
+                "name": it.get("name", ""),
+                "brand": it.get("brand", "") or "",
+                "price": float(it["price"]) if it.get("price") is not None else 0.0,
+                "qty": int(it["qty"]) if it.get("qty") is not None else 0,
+                "category": it.get("category", ""),
             })
-    return rows
+        return rows
+    return []
 
 
 @lru_cache(maxsize=16)
@@ -108,6 +101,9 @@ def _ranked_for(date: str) -> list[dict]:
         return []
     gaps = find_gaps(jerrys, competitors)
     ranked = rank_recommendations(gaps, max_items=200)
+    # Substitute-aware AI re-ranking (no-op if OPENAI_API_KEY is unset).
+    if ai_backbone.is_enabled():
+        ranked = ai_backbone.assess_recommendations(ranked, jerrys)
     # Stamp a stable id on each rec so the slide-out can fetch one back.
     for i, r in enumerate(ranked):
         r["id"] = i
@@ -176,7 +172,21 @@ def score_breakdown(rec: dict) -> list[tuple[str, int]]:
     extra_sources = max(0, len(rec.get("sources") or [rec.get("source")]) - 1)
     if extra_sources:
         items.append((f"Carried by {extra_sources} extra competitor(s)", extra_sources * 3))
+    adj = rec.get("ai_adjustment")
+    if adj is not None:
+        verdict = {
+            "true_gap": "AI: true gap — Jerry's has no substitute",
+            "brand_gap": "AI: brand gap — Jerry's has a similar item",
+            "covered": "AI: covered — Jerry's already carries it",
+        }.get(rec.get("ai_status"), "AI adjustment")
+        items.append((verdict, adj))
     return items
+
+
+def display_score(rec: dict) -> int:
+    """The score to show: AI-adjusted final_score when present, else base score."""
+    val = rec.get("final_score")
+    return val if val is not None else rec.get("score", 0)
 
 
 def invalidate_caches() -> None:

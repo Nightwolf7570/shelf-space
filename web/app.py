@@ -21,6 +21,8 @@ BASE_DIR = Path(__file__).resolve().parent
 app = FastAPI(title="MysteryScraper")
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 templates = Jinja2Templates(directory=BASE_DIR / "templates")
+# Expose the AI-adjusted display score to all templates.
+templates.env.globals["display_score"] = da.display_score
 
 
 def _shared(date: str | None) -> dict:

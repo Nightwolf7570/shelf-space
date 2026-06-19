@@ -7,6 +7,7 @@ import io
 import json
 import re
 import subprocess
+import sys
 from pathlib import Path
 from datetime import datetime
 import streamlit as st
@@ -20,6 +21,7 @@ from reportlab.lib.enums import TA_LEFT, TA_CENTER
 
 from analyze import find_gaps, rank_recommendations, diff_snapshots
 from config import BRAND_ALIASES
+import ai_backbone
 
 # --- Page config ---
 st.set_page_config(
@@ -63,7 +65,29 @@ st.markdown("""
 
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
-    header {visibility: hidden;}
+
+    /* Hide the header chrome (Deploy button, status, hamburger) but keep the
+       header itself live — the sidebar expand ("›") control lives inside it,
+       so hiding the whole header leaves no way to reopen a collapsed sidebar. */
+    [data-testid="stHeader"] { background: transparent; box-shadow: none; }
+    /* Hide the action items (Deploy, ⋮ menu, status) but NOT the toolbar itself
+       — the sidebar expand button is rendered inside the toolbar, so hiding the
+       whole toolbar also kills the only way to reopen a collapsed sidebar. */
+    [data-testid="stToolbarActions"] { display: none !important; }
+    [data-testid="stAppDeployButton"] { display: none !important; }
+    [data-testid="stDecoration"] { display: none !important; }
+    [data-testid="stStatusWidget"] { display: none !important; }
+
+    /* Always keep the sidebar expand/collapse controls visible and clickable.
+       (Streamlit 1.58 testids: stExpandSidebarButton is the "»" that appears
+       when collapsed; stSidebarCollapseButton is the "«" inside the sidebar.) */
+    [data-testid="stExpandSidebarButton"],
+    [data-testid="stSidebarCollapseButton"] {
+        visibility: visible !important;
+        display: flex !important;
+        opacity: 1 !important;
+        z-index: 1000000 !important;
+    }
 
     section[data-testid="stSidebar"] {
         background-color: var(--bg-secondary);
@@ -172,6 +196,10 @@ st.markdown("""
     .badge-high-rated { background: #dbeafe; color: #1d4ed8; }
     .badge-empty { color: var(--text-tertiary); font-size: 13px; }
 
+    .badge-true-gap { background: #dcfce7; color: #166534; }
+    .badge-brand-gap { background: #fef3c7; color: #92400e; }
+    .badge-covered { background: #f3f4f6; color: #6b7280; }
+
     .source-tag { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--text-secondary); margin-right: 6px; }
     .source-dot { width: 6px; height: 6px; border-radius: 50%; display: inline-block; }
 
@@ -234,6 +262,20 @@ def signal_badge(signal: str) -> str:
     elif signal == "high_rated":
         return '<span class="badge badge-high-rated">High Rated</span>'
     return '<span class="badge-empty">&mdash;</span>'
+
+
+AI_STATUS_LABELS = {
+    "true_gap": ("True Gap", "badge-true-gap"),
+    "brand_gap": ("Brand Gap", "badge-brand-gap"),
+    "covered": ("Covered", "badge-covered"),
+}
+
+
+def ai_badge(status: str) -> str:
+    label, cls = AI_STATUS_LABELS.get(status, (None, None))
+    if not label:
+        return '<span class="badge-empty">&mdash;</span>'
+    return f'<span class="badge {cls}">{label}</span>'
 
 
 def source_tags(sources: list) -> str:
@@ -333,7 +375,7 @@ def generate_gaps_pdf(recs: list, gaps_count: int, num_comp: int, snap_dt: str, 
             price_str,
             Paragraph(sources_str, cell_style),
             signal,
-            str(r["score"]),
+            str(r.get("final_score", r.get("score", 0))),
         ])
 
     tbl = Table(table_data, colWidths=col_widths, repeatRows=1)
@@ -395,7 +437,7 @@ def generate_gaps_pdf(recs: list, gaps_count: int, num_comp: int, snap_dt: str, 
     return buf.getvalue()
 
 
-def render_recommendations_table(recs: list, category_filter: str = "All") -> str:
+def render_recommendations_table(recs: list, category_filter: str = "All", show_ai: bool = False) -> str:
     rows_html = []
     for i, r in enumerate(recs, 1):
         sig = r.get("signal", "")
@@ -407,6 +449,12 @@ def render_recommendations_table(recs: list, category_filter: str = "All") -> st
 
         price_str = f"${r['price']:.2f}" if r.get("price") else "&mdash;"
         product_name = r["name"][:75]
+        display_score = r.get("final_score", r.get("score", 0))
+
+        ai_cell = ""
+        if show_ai:
+            rationale = (r.get("ai_rationale") or "").replace('"', "&quot;")
+            ai_cell = f'<td title="{rationale}">{ai_badge(r.get("ai_status", ""))}</td>'
 
         rows_html.append(
             f'<tr>'
@@ -417,13 +465,15 @@ def render_recommendations_table(recs: list, category_filter: str = "All") -> st
             f'<td class="price-cell">{price_str}</td>'
             f'<td>{source_tags(sources)}</td>'
             f'<td>{signal_badge(sig)}</td>'
-            f'<td>{score_bar(r["score"])}</td>'
+            f'{ai_cell}'
+            f'<td>{score_bar(display_score)}</td>'
             f'</tr>'
         )
 
     if not rows_html:
         return '<div class="info-box">No recommendations match the current filters.</div>'
 
+    ai_header = '<th>AI Verdict</th>' if show_ai else ''
     return (
         '<table class="rec-table">'
         "<thead><tr>"
@@ -434,6 +484,7 @@ def render_recommendations_table(recs: list, category_filter: str = "All") -> st
         '<th style="width:80px;">Price</th>'
         "<th>Carried By</th>"
         "<th>Signal</th>"
+        f"{ai_header}"
         '<th style="width:110px;">Score</th>'
         "</tr></thead>"
         f"<tbody>{''.join(rows_html)}</tbody>"
@@ -443,42 +494,60 @@ def render_recommendations_table(recs: list, category_filter: str = "All") -> st
 
 # --- Data loading ---
 @st.cache_data
-def load_jerrys_md():
-    """Parse verified Jerry's inventory from markdown."""
-    md_path = Path("/Users/Welcome123/.superset/worktrees/MysteryScraper/clarification-needed/output/ace/jerrys_paint_products.md")
-    if not md_path.exists():
+def load_jerrys_catalog(snapshot_date=None, snapshot_dir="data/snapshots"):
+    """Load Jerry's Ace inventory from the dated ace_catalog snapshots.
+
+    Prefers the catalog matching the selected snapshot date. Some scrape runs
+    fail to capture the Ace catalog (the file is written but empty), so we fall
+    back to the most recent non-empty catalog.
+
+    Returns (DataFrame, ace_products_list). The DataFrame uses the column names
+    the rest of the UI expects (brand, product, price, qty, category); the list
+    form (name, brand, price, category, qty) feeds the gap analysis.
+    """
+    snap_dir = Path(snapshot_dir)
+    if not snap_dir.exists():
         return pd.DataFrame(), []
 
-    text = md_path.read_text()
+    ace_files = sorted(snap_dir.glob("*_ace_catalog.json"))
+    if not ace_files:
+        return pd.DataFrame(), []
+
+    # Try the selected date first, then newest -> oldest until we find data.
+    candidates = []
+    if snapshot_date:
+        preferred = snap_dir / f"{snapshot_date}_ace_catalog.json"
+        if preferred.exists():
+            candidates.append(preferred)
+    for f in reversed(ace_files):
+        if f not in candidates:
+            candidates.append(f)
+
+    items = []
+    for f in candidates:
+        try:
+            with open(f) as fh:
+                data = json.load(fh)
+        except (json.JSONDecodeError, OSError):
+            continue
+        if data:
+            items = data
+            break
+
+    if not items:
+        return pd.DataFrame(), []
+
     rows = []
-    current_cat = ""
-    for line in text.splitlines():
-        if line.startswith("## "):
-            m = re.match(r"## (.+?) \((\d+)\)", line)
-            if m:
-                current_cat = m.group(1)
-        if line.startswith("| ") and not line.startswith("| Brand") and not line.startswith("|---"):
-            parts = [c.strip() for c in line.split("|")[1:-1]]
-            if len(parts) >= 4:
-                price_str = parts[2].replace("$", "").replace(",", "")
-                try:
-                    price = float(price_str)
-                except ValueError:
-                    price = 0.0
-                try:
-                    qty = int(parts[3])
-                except ValueError:
-                    qty = 0
-                rows.append({
-                    "brand": parts[0],
-                    "product": parts[1],
-                    "price": price,
-                    "qty": qty,
-                    "category": current_cat,
-                })
+    for it in items:
+        rows.append({
+            "brand": it.get("brand", "") or "",
+            "product": it.get("name", ""),
+            "price": float(it["price"]) if it.get("price") is not None else 0.0,
+            "qty": int(it["qty"]) if it.get("qty") is not None else 0,
+            "category": it.get("category", ""),
+        })
 
     df = pd.DataFrame(rows)
-    # Also build list format for gap analysis
     ace_products = [{"name": r["product"], "brand": r["brand"], "price": r["price"],
                      "category": r["category"], "qty": r["qty"]} for r in rows]
     return df, ace_products
@@ -631,6 +700,13 @@ def load_serpapi_data():
     return pd.DataFrame(all_rows) if all_rows else pd.DataFrame()
 
 
+@st.cache_data(show_spinner="Analyzing gaps with AI…")
+def ai_enrich_cached(_recs, _ace_products, model, cache_key):
+    """Cached wrapper around the AI backbone. Underscored args are not hashed;
+    cache_key (snapshot date + count + model) controls cache invalidation."""
+    return ai_backbone.assess_recommendations(_recs, _ace_products, model=model)
+
+
 # --- Load data ---
 snapshot_dates = list_snapshot_dates()
 latest_snapshot_date = snapshot_dates[-1] if snapshot_dates else None
@@ -640,8 +716,8 @@ if latest_snapshot_date and st.session_state.get("selected_snapshot_date") not i
     st.session_state["selected_snapshot_date"] = latest_snapshot_date
 
 selected_snapshot_date = st.session_state.get("selected_snapshot_date")
-jerrys_df, ace_products = load_jerrys_md()
 competitors, snap_date = load_snapshot(selected_snapshot_date)
+jerrys_df, ace_products = load_jerrys_catalog(snap_date)
 has_jerrys = not jerrys_df.empty
 has_snapshot = bool(competitors)
 
@@ -770,9 +846,34 @@ with st.sidebar:
 
     st.markdown("---")
 
+    st.markdown('<div class="sidebar-section-label">AI Analysis</div>', unsafe_allow_html=True)
+    ai_enabled = ai_backbone.is_enabled()
+    if ai_enabled:
+        ai_on = st.toggle(
+            "Substitute-aware scoring",
+            value=True,
+            key="ai_on",
+            help="Uses OpenAI to detect when Jerry's already stocks a similar "
+                 "product (different brand) and adjusts gap scores down, while "
+                 "boosting products Jerry's has no answer for.",
+        )
+        st.markdown(
+            f'<div class="sidebar-stat">Model: {ai_backbone.OPENAI_MODEL}</div>',
+            unsafe_allow_html=True,
+        )
+    else:
+        ai_on = False
+        st.markdown(
+            '<div class="sidebar-stat">Add <code>OPENAI_API_KEY</code> to your '
+            '<code>.env</code> to enable AI gap scoring.</div>',
+            unsafe_allow_html=True,
+        )
+
+    st.markdown("---")
+
     st.markdown('<div class="sidebar-section-label">Actions</div>', unsafe_allow_html=True)
     if st.button("Re-run Scrapers", use_container_width=True):
-        cmd = ["python3", "-u", "run_snapshot.py"]
+        cmd = [sys.executable, "-u", "run_snapshot.py"]
         if scrape_categories and set(scrape_categories) != set(available_cats):
             cmd += ["--categories"] + scrape_categories
         cmd += ["--max-results", str(max_total)]
@@ -794,6 +895,16 @@ with st.sidebar:
             st.error("Scraper failed!")
             with st.expander("Error log"):
                 st.code(result.stderr or result.stdout, language="text")
+
+# --- AI enrichment (runs after the sidebar so the toggle state is known) ---
+ai_active = bool(recommendations) and ai_enabled and ai_on
+if ai_active:
+    recommendations = ai_enrich_cached(
+        recommendations,
+        ace_products,
+        ai_backbone.OPENAI_MODEL,
+        f"{snap_date}:{len(recommendations)}:{ai_backbone.OPENAI_MODEL}",
+    )
 
 # --- Filter Jerry's data ---
 jf = jerrys_df.copy() if has_jerrys else pd.DataFrame()
@@ -939,17 +1050,23 @@ with tab2:
             unsafe_allow_html=True,
         )
     else:
+        ranking_note = (
+            "ranked by AI-adjusted score — products Jerry's already covers with a "
+            "similar item (different brand) are scored down, true gaps are boosted."
+            if ai_active else
+            "ranked by score descending."
+        )
         st.markdown(
             f'<div class="summary-text">'
             f'Found <strong>{len(gaps):,} gaps</strong> across '
             f'<strong>{num_competitors} competitors</strong>. '
             f'Top <strong>{len(recommendations)}</strong> products '
-            f"Jerry's should consider stocking, ranked by score descending."
+            f"Jerry's should consider stocking, {ranking_note}"
             f'</div>',
             unsafe_allow_html=True,
         )
 
-        table_html = render_recommendations_table(recommendations, selected_cat)
+        table_html = render_recommendations_table(recommendations, selected_cat, show_ai=ai_active)
         st.markdown(table_html, unsafe_allow_html=True)
 
         st.markdown("<div style='height: 20px;'></div>", unsafe_allow_html=True)
@@ -975,6 +1092,19 @@ with tab2:
                     with dcol1:
                         rating_str = f"{r['rating']:.1f}" if r.get("rating") else "N/A"
                         reviews_str = f"{int(r['reviews']):,}" if r.get("reviews") else "N/A"
+
+                        if r.get("ai_status"):
+                            adj = r.get("ai_adjustment", 0)
+                            adj_str = f"{adj:+d}" if adj else "0"
+                            score_row = (
+                                f'<tr><td>Base score</td><td>{r.get("score", 0)}</td></tr>'
+                                f'<tr><td>AI adjustment</td><td>{adj_str}</td></tr>'
+                                f'<tr><td>Final score</td><td><strong>{r.get("final_score", r.get("score", 0))}</strong></td></tr>'
+                                f'<tr><td>AI verdict</td><td>{ai_badge(r.get("ai_status", ""))}</td></tr>'
+                            )
+                        else:
+                            score_row = f'<tr><td>Score</td><td><strong>{r.get("score", 0)}</strong> / 30</td></tr>'
+
                         st.markdown(
                             f'<table class="scoring-table">'
                             f'<tr><td>Brand</td><td>{r.get("brand", "Unknown")}</td></tr>'
@@ -983,11 +1113,24 @@ with tab2:
                             f'<tr><td>Rating</td><td>{rating_str}</td></tr>'
                             f'<tr><td>Reviews</td><td>{reviews_str}</td></tr>'
                             f'<tr><td>Signal</td><td>{signal_badge(r.get("signal", ""))}</td></tr>'
-                            f'<tr><td>Score</td><td><strong>{r["score"]}</strong> / 30</td></tr>'
+                            f'{score_row}'
                             f'<tr><td>Carried By</td><td>{source_tags(sources)}</td></tr>'
                             f'</table>',
                             unsafe_allow_html=True,
                         )
+
+                        if r.get("ai_rationale"):
+                            sub = r.get("ai_substitute")
+                            sub_line = (
+                                f"<div style='font-size:12px; color:#9ca3af; margin-top:4px;'>"
+                                f"Closest Jerry's item: {sub}</div>" if sub else ""
+                            )
+                            st.markdown(
+                                f"<div style='margin-top:10px; padding:10px 12px; background:#f9fafb; "
+                                f"border-radius:8px; font-size:13px; color:#374151;'>"
+                                f"<strong>AI:</strong> {r['ai_rationale']}{sub_line}</div>",
+                                unsafe_allow_html=True,
+                            )
 
                     with dcol2:
                         # Find similar Jerry's products
@@ -1033,6 +1176,13 @@ with tab2:
                             )
 
         with st.expander("How scores are calculated"):
+            ai_rows = (
+                "<tr><td><strong>AI: true gap (no substitute at Jerry's)</strong></td><td>+6</td></tr>"
+                "<tr><td><strong>AI: brand gap (similar item, other brand)</strong></td><td>-2</td></tr>"
+                "<tr><td><strong>AI: covered (already carried)</strong></td><td>-8</td></tr>"
+                if ai_active else ""
+            )
+            final_order = "AI-adjusted score descending" if ai_active else "Score descending"
             st.markdown(
                 '<table class="scoring-table">'
                 "<tr><td>Bestseller badge at competitor</td><td>+5</td></tr>"
@@ -1042,7 +1192,8 @@ with tab2:
                 "<tr><td>500+ customer reviews</td><td>+2</td></tr>"
                 "<tr><td>Has listed price</td><td>+2</td></tr>"
                 "<tr><td>Each additional competitor carrying it</td><td>+3</td></tr>"
-                "<tr><td>Final ordering</td><td>Score descending</td></tr>"
+                f"{ai_rows}"
+                f"<tr><td>Final ordering</td><td>{final_order}</td></tr>"
                 "</table>",
                 unsafe_allow_html=True,
             )

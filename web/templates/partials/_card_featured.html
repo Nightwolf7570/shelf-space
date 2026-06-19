@@ -1,4 +1,5 @@
 {% set srcs = r.sources or [r.source] %}
+{% from 'partials/_ai_badge.html' import ai_badge %}
 <button
   type="button"
   class="group text-left bg-white border border-slate-200 rounded-2xl p-6 sm:col-span-2 xl:col-span-2 hover:border-slate-400 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2 transition flex flex-col gap-4 relative overflow-hidden"
@@ -15,9 +16,12 @@
       <span class="text-xs text-slate-400">·</span>
       <span class="text-xs text-slate-500 tabular-nums">#1 of {{ rest_count + 1 }}</span>
     </div>
-    <span class="inline-flex items-center gap-1 bg-brand-50 text-brand-700 text-sm font-semibold px-3 py-1 rounded-full tabular-nums">
-      Score {{ r.score }}
-    </span>
+    <div class="flex items-center gap-2">
+      {{ ai_badge(r.ai_status) }}
+      <span class="inline-flex items-center gap-1 bg-brand-50 text-brand-700 text-sm font-semibold px-3 py-1 rounded-full tabular-nums">
+        Score {{ display_score(r) }}
+      </span>
+    </div>
   </div>
 
   <div class="flex-1">
@@ -26,6 +30,9 @@
       {{ r.brand or 'Unknown brand' }} · {{ srcs | join(', ') }}
       {% if r.category %} · {{ r.category }}{% endif %}
     </div>
+    {% if r.ai_rationale %}
+    <div class="text-sm text-slate-600 mt-2 leading-snug"><span class="font-semibold text-slate-700">AI:</span> {{ r.ai_rationale }}</div>
+    {% endif %}
   </div>
 
   <dl class="flex flex-wrap items-end gap-x-8 gap-y-2">

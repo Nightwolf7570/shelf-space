@@ -1,5 +1,7 @@
 streamlit
+pandas
 python-dotenv
+openai
 serpapi
 apify-client
 reportlab

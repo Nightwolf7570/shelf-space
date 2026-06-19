@@ -1,4 +1,5 @@
 {% set srcs = rec.sources or [rec.source] %}
+{% from 'partials/_ai_badge.html' import ai_badge %}
 <div class="p-6">
   <div class="flex items-start justify-between gap-4 mb-4">
     <div>
@@ -8,16 +9,26 @@
     <button type="button" onclick="closeDetail()" class="text-slate-400 hover:text-slate-900 text-xl leading-none" aria-label="Close">×</button>
   </div>
 
-  <div class="flex items-center gap-2 mb-5">
+  <div class="flex items-center flex-wrap gap-2 mb-5">
     <span class="inline-flex items-center bg-brand-50 text-brand-700 text-xs font-semibold px-2.5 py-1 rounded-full">
-      Score {{ rec.score }}
+      Score {{ display_score(rec) }}
     </span>
+    {{ ai_badge(rec.ai_status) }}
     {% if rec.signal == 'bestseller' %}
       <span class="text-[11px] font-medium text-brand-700 bg-brand-50 px-2 py-0.5 rounded">Bestseller</span>
     {% elif rec.signal == 'high_rated' %}
       <span class="text-[11px] font-medium text-slate-700 bg-slate-100 px-2 py-0.5 rounded">Top Rated</span>
     {% endif %}
   </div>
+
+  {% if rec.ai_rationale %}
+  <div class="bg-slate-50 border border-slate-100 rounded-lg px-3 py-2.5 text-sm text-slate-700 mb-5 leading-snug">
+    <span class="font-semibold text-slate-900">AI assessment:</span> {{ rec.ai_rationale }}
+    {% if rec.ai_substitute %}
+      <div class="text-xs text-slate-500 mt-1">Closest Jerry's item: {{ rec.ai_substitute }}</div>
+    {% endif %}
+  </div>
+  {% endif %}
 
   <dl class="grid grid-cols-2 gap-y-3 gap-x-4 text-sm mb-6">
     <dt class="text-slate-500">Brand</dt><dd class="text-slate-900 font-medium">{{ rec.brand or 'Unknown' }}</dd>
@@ -48,12 +59,12 @@
         {% for label, pts in breakdown %}
           <li class="flex justify-between">
             <span class="text-slate-600">{{ label }}</span>
-            <span class="text-slate-900 font-medium tabular-nums">+{{ pts }}</span>
+            <span class="text-slate-900 font-medium tabular-nums">{% if pts >= 0 %}+{{ pts }}{% else %}{{ pts }}{% endif %}</span>
           </li>
         {% endfor %}
         <li class="flex justify-between pt-2 mt-1 border-t border-slate-100">
           <span class="text-slate-900 font-semibold">Total</span>
-          <span class="text-slate-900 font-semibold tabular-nums">{{ rec.score }}</span>
+          <span class="text-slate-900 font-semibold tabular-nums">{{ display_score(rec) }}</span>
         </li>
       </ul>
     {% else %}
