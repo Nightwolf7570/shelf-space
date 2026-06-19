@@ -20,7 +20,7 @@ OUTPUT_DIR.mkdir(exist_ok=True)
 def target_redsky(search_term, filename):
     """Query Target Redsky API."""
     print(f"\nTARGET Redsky: '{search_term}'")
-    api_key = "REDACTED_TARGET_KEY"
+    api_key = os.getenv("TARGET_REDSKY_KEY", "")
     store_id = "3330"
     url = (
         f"https://redsky.target.com/redsky_aggregations/v1/web/plp_search_v2"

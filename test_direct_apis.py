@@ -9,6 +9,10 @@ from pathlib import Path
 import urllib.request
 import urllib.parse
 
+from dotenv import load_dotenv
+
+load_dotenv()
+
 OUTPUT_DIR = Path("output")
 OUTPUT_DIR.mkdir(exist_ok=True)
 
@@ -20,7 +24,7 @@ def test_target_redsky():
     print("=" * 60)
 
     # Target Redsky API endpoint for search
-    api_key = "REDACTED_TARGET_KEY"
+    api_key = os.getenv("TARGET_REDSKY_KEY", "")
     store_id = "3330"  # A Denver-area Target store
     zip_code = "80205"
 
