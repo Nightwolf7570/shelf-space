@@ -1,4 +1,7 @@
 .env
+.env*
+.mcp.json
+.github/hooks/
 __pycache__/
 *.pyc
 output/

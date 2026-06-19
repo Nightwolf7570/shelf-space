@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block search_target %}/partials/inventory{% endblock %}
+{% block date_target %}/partials/inventory{% endblock %}
+
+{% block main %}
+<div class="mb-5">
+  <h1 class="text-xl font-semibold text-slate-900">Jerry's Inventory</h1>
+  <p class="text-sm text-slate-500 mt-0.5">
+    Verified catalog at store #17892. Low stock (≤3) flagged.
+  </p>
+</div>
+
+<div id="tab-content">
+  {% include "partials/_inventory_groups.html" %}
+</div>
+{% endblock %}

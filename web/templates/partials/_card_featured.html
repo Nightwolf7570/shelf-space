@@ -1,0 +1,59 @@
+{% set srcs = r.sources or [r.source] %}
+<button
+  type="button"
+  class="group text-left bg-white border border-slate-200 rounded-2xl p-6 sm:col-span-2 xl:col-span-2 hover:border-slate-400 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2 transition flex flex-col gap-4 relative overflow-hidden"
+  hx-get="/detail/{{ r.id }}?date={{ snapshot_date }}"
+  hx-target="#detail-panel"
+  hx-swap="innerHTML"
+  aria-label="Top pick: {{ r.name }}"
+>
+  <span aria-hidden="true" class="absolute top-0 left-0 h-1 w-full bg-brand-600"></span>
+
+  <div class="flex items-center justify-between">
+    <div class="flex items-center gap-2">
+      <span class="text-[11px] uppercase tracking-wide text-brand-700 font-semibold">Top pick</span>
+      <span class="text-xs text-slate-400">·</span>
+      <span class="text-xs text-slate-500 tabular-nums">#1 of {{ rest_count + 1 }}</span>
+    </div>
+    <span class="inline-flex items-center gap-1 bg-brand-50 text-brand-700 text-sm font-semibold px-3 py-1 rounded-full tabular-nums">
+      Score {{ r.score }}
+    </span>
+  </div>
+
+  <div class="flex-1">
+    <div class="text-lg sm:text-xl font-semibold text-slate-900 leading-snug line-clamp-2">{{ r.name }}</div>
+    <div class="text-sm text-slate-500 mt-1.5">
+      {{ r.brand or 'Unknown brand' }} · {{ srcs | join(', ') }}
+      {% if r.category %} · {{ r.category }}{% endif %}
+    </div>
+  </div>
+
+  <dl class="flex flex-wrap items-end gap-x-8 gap-y-2">
+    <div>
+      <dt class="text-[11px] uppercase tracking-wide text-slate-500 font-semibold">Price</dt>
+      <dd class="text-xl font-bold text-slate-900 tabular-nums mt-0.5">
+        {% if r.price %}${{ '%.2f' % r.price }}{% else %}—{% endif %}
+      </dd>
+    </div>
+    {% if r.rating %}
+    <div>
+      <dt class="text-[11px] uppercase tracking-wide text-slate-500 font-semibold">Rating</dt>
+      <dd class="text-sm font-medium text-slate-900 tabular-nums mt-1">{{ '%.1f' % r.rating }} ★</dd>
+    </div>
+    {% endif %}
+    {% if r.reviews %}
+    <div>
+      <dt class="text-[11px] uppercase tracking-wide text-slate-500 font-semibold">Reviews</dt>
+      <dd class="text-sm font-medium text-slate-900 tabular-nums mt-1">{{ '{:,}'.format(r.reviews|int) }}</dd>
+    </div>
+    {% endif %}
+    {% if r.signal %}
+    <div>
+      <dt class="text-[11px] uppercase tracking-wide text-slate-500 font-semibold">Signal</dt>
+      <dd class="text-sm font-medium text-slate-900 mt-1">
+        {% if r.signal == 'bestseller' %}Bestseller{% elif r.signal == 'high_rated' %}Top Rated{% else %}—{% endif %}
+      </dd>
+    </div>
+    {% endif %}
+  </dl>
+</button>

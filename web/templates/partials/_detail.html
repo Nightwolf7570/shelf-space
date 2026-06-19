@@ -1,0 +1,86 @@
+{% set srcs = rec.sources or [rec.source] %}
+<div class="p-6">
+  <div class="flex items-start justify-between gap-4 mb-4">
+    <div>
+      <div class="text-[11px] uppercase tracking-wide text-slate-400 font-semibold">Recommendation</div>
+      <h2 class="text-lg font-semibold text-slate-900 mt-0.5 leading-snug">{{ rec.name }}</h2>
+    </div>
+    <button type="button" onclick="closeDetail()" class="text-slate-400 hover:text-slate-900 text-xl leading-none" aria-label="Close">×</button>
+  </div>
+
+  <div class="flex items-center gap-2 mb-5">
+    <span class="inline-flex items-center bg-brand-50 text-brand-700 text-xs font-semibold px-2.5 py-1 rounded-full">
+      Score {{ rec.score }}
+    </span>
+    {% if rec.signal == 'bestseller' %}
+      <span class="text-[11px] font-medium text-brand-700 bg-brand-50 px-2 py-0.5 rounded">Bestseller</span>
+    {% elif rec.signal == 'high_rated' %}
+      <span class="text-[11px] font-medium text-slate-700 bg-slate-100 px-2 py-0.5 rounded">Top Rated</span>
+    {% endif %}
+  </div>
+
+  <dl class="grid grid-cols-2 gap-y-3 gap-x-4 text-sm mb-6">
+    <dt class="text-slate-500">Brand</dt><dd class="text-slate-900 font-medium">{{ rec.brand or 'Unknown' }}</dd>
+    <dt class="text-slate-500">Category</dt><dd class="text-slate-900">{{ rec.category or '—' }}</dd>
+    <dt class="text-slate-500">Price</dt>
+    <dd class="text-slate-900 font-semibold tabular-nums">
+      {% if rec.price %}${{ '%.2f' % rec.price }}{% else %}—{% endif %}
+    </dd>
+    <dt class="text-slate-500">Rating</dt>
+    <dd class="text-slate-900">{% if rec.rating %}{{ '%.1f' % rec.rating }} ★{% else %}—{% endif %}</dd>
+    <dt class="text-slate-500">Reviews</dt>
+    <dd class="text-slate-900">{% if rec.reviews %}{{ '{:,}'.format(rec.reviews|int) }}{% else %}—{% endif %}</dd>
+    <dt class="text-slate-500">Carried by</dt>
+    <dd class="text-slate-900">{{ srcs | join(', ') }}</dd>
+  </dl>
+
+  {% if rec.url %}
+    <a href="{{ rec.url }}" target="_blank" rel="noopener"
+       class="inline-flex items-center text-sm font-medium text-brand-700 hover:text-brand-600 mb-6">
+      View on retailer site →
+    </a>
+  {% endif %}
+
+  <div class="border-t border-slate-100 pt-5 mb-6">
+    <h3 class="text-[11px] uppercase tracking-wide text-slate-400 font-semibold mb-3">Score breakdown</h3>
+    {% if breakdown %}
+      <ul class="text-sm space-y-1.5">
+        {% for label, pts in breakdown %}
+          <li class="flex justify-between">
+            <span class="text-slate-600">{{ label }}</span>
+            <span class="text-slate-900 font-medium tabular-nums">+{{ pts }}</span>
+          </li>
+        {% endfor %}
+        <li class="flex justify-between pt-2 mt-1 border-t border-slate-100">
+          <span class="text-slate-900 font-semibold">Total</span>
+          <span class="text-slate-900 font-semibold tabular-nums">{{ rec.score }}</span>
+        </li>
+      </ul>
+    {% else %}
+      <p class="text-sm text-slate-500">No scoring signals captured.</p>
+    {% endif %}
+  </div>
+
+  <div class="border-t border-slate-100 pt-5">
+    <h3 class="text-[11px] uppercase tracking-wide text-slate-400 font-semibold mb-3">Jerry's closest products</h3>
+    {% if similar %}
+      <ul class="space-y-2">
+        {% for p in similar %}
+          <li class="bg-slate-50 rounded-lg px-3 py-2 text-sm">
+            <div class="font-medium text-slate-900 leading-snug">{{ p.name }}</div>
+            <div class="text-xs text-slate-500 mt-0.5">
+              {{ p.brand }} ·
+              {% if p.price %}${{ '%.2f' % p.price }}{% else %}—{% endif %}
+              {% if p.qty is not none %} · {{ p.qty }} on hand{% endif %}
+            </div>
+          </li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      <div class="bg-amber-50 border border-amber-100 rounded-lg px-3 py-3 text-sm">
+        <div class="font-semibold text-amber-900">Gap confirmed</div>
+        <div class="text-amber-800 mt-0.5">Jerry's carries no similar products in this space.</div>
+      </div>
+    {% endif %}
+  </div>
+</div>

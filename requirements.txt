@@ -3,3 +3,8 @@ python-dotenv
 serpapi
 apify-client
 reportlab
+fastapi
+uvicorn[standard]
+jinja2
+python-multipart
+

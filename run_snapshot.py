@@ -85,6 +85,14 @@ def run(categories=None, skip_scrape=False, max_results=400, budget=5.0):
     comp_path = SNAPSHOT_DIR / f"{today}_competitors.json"
     ace_path = SNAPSHOT_DIR / f"{today}_ace_catalog.json"
 
+    if not all_competitor_products:
+        print(
+            "\n  WARNING: zero competitor products were scraped. "
+            "Refusing to write empty snapshots so the latest good run remains visible. "
+            "Check your APIFY_API_TOKEN, the budget cap, and recent actor errors above."
+        )
+        return
+
     with open(comp_path, "w") as f:
         json.dump(all_competitor_products, f, indent=2)
     print(f"\n  Saved {len(all_competitor_products)} competitor products -> {comp_path}")

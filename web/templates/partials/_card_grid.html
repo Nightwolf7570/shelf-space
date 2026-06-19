@@ -1,0 +1,18 @@
+{% if not recs %}
+  <div class="bg-white border border-dashed border-slate-200 rounded-xl py-14 px-6 text-center">
+    <div class="text-sm font-semibold text-slate-900">No matches</div>
+    <p class="text-sm text-slate-500 mt-1 max-w-sm mx-auto">
+      Nothing in this snapshot matches your filters. Try clearing the search or switching to a different snapshot date.
+    </p>
+  </div>
+{% else %}
+  <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 htmx-fade">
+    {% set r = recs[0] %}
+    {% set rest_count = recs|length - 1 %}
+    {% include "partials/_card_featured.html" %}
+    {% for r in recs[1:] %}
+      {% set rank = loop.index + 1 %}
+      {% include "partials/_card.html" %}
+    {% endfor %}
+  </div>
+{% endif %}

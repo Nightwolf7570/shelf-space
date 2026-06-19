@@ -1,0 +1,79 @@
+{% set s = status %}
+
+<div
+  {% if s.state == 'running' %}
+  hx-get="/run/status"
+  hx-trigger="load delay:1s"
+  hx-target="#run-status"
+  hx-swap="innerHTML"
+  {% endif %}
+>
+  {# Status header #}
+  {% if s.state == 'idle' %}
+    <div class="text-sm text-slate-500">No run started yet. Set budget and max products above, then hit <strong class="text-slate-700">Start run</strong>.</div>
+  {% else %}
+    <div class="flex flex-wrap items-baseline justify-between gap-3 mb-3">
+      <div class="flex items-center gap-2">
+        {% if s.state == 'running' %}
+          <span class="inline-flex items-center gap-1.5 bg-brand-50 text-brand-700 text-xs font-semibold px-2.5 py-1 rounded-full">
+            <span class="w-1.5 h-1.5 rounded-full bg-brand-600 animate-pulse"></span>
+            Running
+          </span>
+        {% elif s.state == 'completed' %}
+          <span class="inline-flex items-center bg-slate-100 text-slate-700 text-xs font-semibold px-2.5 py-1 rounded-full">Completed</span>
+        {% elif s.state == 'failed' %}
+          <span class="inline-flex items-center bg-red-50 text-red-700 text-xs font-semibold px-2.5 py-1 rounded-full">Failed{% if s.exit_code is not none %} · exit {{ s.exit_code }}{% endif %}</span>
+        {% endif %}
+
+        <span class="text-xs text-slate-500">
+          {% if s.state == 'running' %}
+            Elapsed {{ '%d:%02d' % (s.elapsed_s // 60, s.elapsed_s % 60) }}
+            {% if s.remaining_s %} · ~{{ '%d:%02d' % (s.remaining_s // 60, s.remaining_s % 60) }} remaining{% endif %}
+          {% elif s.elapsed_s %}
+            Took {{ '%d:%02d' % (s.elapsed_s // 60, s.elapsed_s % 60) }}
+          {% endif %}
+        </span>
+      </div>
+
+      <div class="text-xs text-slate-400 tabular-nums">{{ s.line_count }} lines</div>
+    </div>
+
+    {# Progress bar #}
+    {% if s.state == 'running' %}
+      <div class="h-1.5 bg-slate-100 rounded-full overflow-hidden mb-3" aria-label="Run progress">
+        <div class="h-full bg-brand-600 transition-all duration-500" style="width: {{ s.progress_pct }}%"></div>
+      </div>
+    {% endif %}
+
+    {# Log output #}
+    <pre id="run-log" class="bg-slate-900 text-slate-100 text-[12px] leading-relaxed rounded-lg p-4 overflow-auto h-[420px] font-mono whitespace-pre-wrap break-words">{% for line in s.lines %}{{ line }}
+{% endfor %}</pre>
+
+    <script>
+      (function () {
+        var el = document.getElementById('run-log');
+        if (el) el.scrollTop = el.scrollHeight;
+      })();
+    </script>
+
+    {% if s.state == 'completed' %}
+      <div class="mt-4 flex items-center gap-2">
+        <a href="/" target="_blank"
+           class="inline-flex items-center bg-brand-600 hover:bg-brand-700 text-white text-sm font-semibold px-4 py-2 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2 transition">
+          View latest snapshot
+        </a>
+        <a href="/run"
+           class="text-sm text-slate-500 hover:text-slate-900 underline-offset-2 hover:underline px-2 py-2">
+          Run again
+        </a>
+      </div>
+    {% elif s.state == 'failed' %}
+      <div class="mt-4">
+        <a href="/run"
+           class="inline-flex items-center border border-slate-200 hover:border-slate-400 text-slate-900 text-sm font-semibold px-4 py-2 rounded-lg transition">
+          Try again
+        </a>
+      </div>
+    {% endif %}
+  {% endif %}
+</div>

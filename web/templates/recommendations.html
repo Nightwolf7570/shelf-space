@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block search_target %}/partials/recommendations{% endblock %}
+{% block date_target %}/partials/recommendations{% endblock %}
+
+{% block main %}
+<div class="flex items-baseline justify-between mb-5">
+  <div>
+    <h1 class="text-xl font-semibold text-slate-900">Recommendations</h1>
+    <p class="text-sm text-slate-500 mt-0.5">
+      Products competitors carry that Jerry's doesn't, ranked by opportunity score.
+      {% if snapshot_summary %}<span class="text-slate-400">· {{ snapshot_summary.date_display }} · {{ snapshot_summary.competitor_count }} competitor items</span>{% endif %}
+    </p>
+  </div>
+</div>
+
+<div class="flex flex-wrap items-center gap-2 mb-5">
+  <select data-filter name="category"
+          class="bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-600"
+          hx-get="/partials/recommendations" hx-trigger="change" hx-target="#tab-content"
+          hx-include="[data-filter], [name=q]">
+    {% for c in categories %}<option {% if c == category %}selected{% endif %}>{{ c }}</option>{% endfor %}
+  </select>
+  <select data-filter name="source"
+          class="bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-600"
+          hx-get="/partials/recommendations" hx-trigger="change" hx-target="#tab-content"
+          hx-include="[data-filter], [name=q]">
+    {% for s in sources %}<option {% if s == source %}selected{% endif %}>{{ s }}</option>{% endfor %}
+  </select>
+</div>
+
+<div id="tab-content">
+  {% include "partials/_card_grid.html" %}
+</div>
+{% endblock %}

@@ -1,0 +1,34 @@
+{% if not grouped %}
+  <div class="text-center py-20 text-slate-500 text-sm">No products match.</div>
+{% else %}
+  <div class="space-y-8">
+    {% for cat, items in grouped.items() %}
+      <section>
+        <div class="flex items-baseline justify-between mb-3">
+          <h2 class="text-sm font-semibold text-slate-900 uppercase tracking-wide">{{ cat }}</h2>
+          <span class="text-xs text-slate-500">{{ items | length }} products</span>
+        </div>
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+          {% for p in items %}
+            <div class="bg-white border border-slate-200 rounded-xl p-4 flex flex-col gap-2 min-h-[120px]">
+              <div class="text-sm font-medium text-slate-900 line-clamp-2 leading-snug">{{ p.name }}</div>
+              <div class="text-xs text-slate-500">{{ p.brand }}</div>
+              <div class="mt-auto flex items-center justify-between">
+                <div class="text-sm font-semibold text-slate-900 tabular-nums">
+                  {% if p.price %}${{ '%.2f' % p.price }}{% else %}<span class="text-slate-300">—</span>{% endif %}
+                </div>
+                {% if p.qty is not none %}
+                  {% if p.qty <= 3 %}
+                    <span class="text-[11px] font-medium text-red-700 bg-red-50 px-2 py-0.5 rounded">Low · {{ p.qty }}</span>
+                  {% else %}
+                    <span class="text-[11px] text-slate-500">{{ p.qty }} on hand</span>
+                  {% endif %}
+                {% endif %}
+              </div>
+            </div>
+          {% endfor %}
+        </div>
+      </section>
+    {% endfor %}
+  </div>
+{% endif %}

@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% block search_target %}/changes{% endblock %}
+{% block date_target %}/changes{% endblock %}
+
+{% block main %}
+<div class="mb-5">
+  <h1 class="text-xl font-semibold text-slate-900">Changes</h1>
+  <p class="text-sm text-slate-500 mt-0.5">What moved since the previous snapshot.</p>
+</div>
+
+{% if not diff %}
+  <div class="bg-white border border-slate-200 rounded-xl p-10 text-center text-sm text-slate-500">
+    No diff available for this snapshot.
+  </div>
+{% else %}
+  <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-6">
+    <div class="bg-white border border-slate-200 rounded-xl px-5 py-4">
+      <div class="text-[11px] uppercase tracking-wide text-slate-500 font-semibold">New items</div>
+      <div class="text-2xl font-bold text-slate-900 mt-1">{{ diff.new_items | length }}</div>
+    </div>
+    <div class="bg-white border border-slate-200 rounded-xl px-5 py-4">
+      <div class="text-[11px] uppercase tracking-wide text-slate-500 font-semibold">Removed</div>
+      <div class="text-2xl font-bold text-slate-900 mt-1">{{ diff.removed_items | length }}</div>
+    </div>
+    <div class="bg-white border border-slate-200 rounded-xl px-5 py-4">
+      <div class="text-[11px] uppercase tracking-wide text-slate-500 font-semibold">Price changes</div>
+      <div class="text-2xl font-bold text-slate-900 mt-1">{{ diff.price_changes | length }}</div>
+    </div>
+  </div>
+
+  {% macro listing(title, items, kind) %}
+    <section class="mb-8">
+      <h2 class="text-sm font-semibold text-slate-900 uppercase tracking-wide mb-3">{{ title }}</h2>
+      {% if not items %}
+        <div class="text-sm text-slate-500">Nothing here.</div>
+      {% else %}
+        <div class="bg-white border border-slate-200 rounded-xl overflow-hidden">
+          <table class="w-full text-sm">
+            <thead class="bg-slate-50 text-[11px] uppercase tracking-wide text-slate-500">
+              <tr>
+                <th class="text-left px-4 py-2.5 font-semibold">Product</th>
+                <th class="text-left px-4 py-2.5 font-semibold">Retailer</th>
+                {% if kind == 'price' %}
+                  <th class="text-right px-4 py-2.5 font-semibold">Was</th>
+                  <th class="text-right px-4 py-2.5 font-semibold">Now</th>
+                  <th class="text-right px-4 py-2.5 font-semibold">Δ</th>
+                {% else %}
+                  <th class="text-right px-4 py-2.5 font-semibold">Price</th>
+                {% endif %}
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-slate-100">
+              {% for p in items[:80] %}
+                <tr class="hover:bg-slate-50">
+                  <td class="px-4 py-2.5 text-slate-900">{{ p.name }}</td>
+                  <td class="px-4 py-2.5 text-slate-600">{{ p.source }}</td>
+                  {% if kind == 'price' %}
+                    <td class="px-4 py-2.5 text-slate-600 text-right tabular-nums">${{ '%.2f' % p.previous_price }}</td>
+                    <td class="px-4 py-2.5 text-slate-900 text-right tabular-nums">${{ '%.2f' % p.price }}</td>
+                    <td class="px-4 py-2.5 text-right tabular-nums font-medium {% if p.price_change_pct > 0 %}text-red-700{% else %}text-brand-700{% endif %}">
+                      {{ '%+.1f' % p.price_change_pct }}%
+                    </td>
+                  {% else %}
+                    <td class="px-4 py-2.5 text-slate-900 text-right tabular-nums">
+                      {% if p.price %}${{ '%.2f' % p.price }}{% else %}—{% endif %}
+                    </td>
+                  {% endif %}
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% endif %}
+    </section>
+  {% endmacro %}
+
+  {{ listing('New items', diff.new_items, 'new') }}
+  {{ listing('Price changes', diff.price_changes, 'price') }}
+  {{ listing('Removed items', diff.removed_items, 'removed') }}
+{% endif %}
+{% endblock %}

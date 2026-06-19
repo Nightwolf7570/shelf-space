@@ -1,0 +1,40 @@
+{% if not items %}
+  <div class="text-center py-20 text-slate-500 text-sm">No products match.</div>
+{% else %}
+  <div class="bg-white border border-slate-200 rounded-xl overflow-hidden">
+    <table class="w-full text-sm">
+      <thead class="bg-slate-50 text-[11px] uppercase tracking-wide text-slate-500">
+        <tr>
+          <th class="text-left px-4 py-2.5 font-semibold">Product</th>
+          <th class="text-left px-4 py-2.5 font-semibold">Brand</th>
+          <th class="text-left px-4 py-2.5 font-semibold">Retailer</th>
+          <th class="text-right px-4 py-2.5 font-semibold">Price</th>
+          <th class="text-right px-4 py-2.5 font-semibold">Rating</th>
+          <th class="text-right px-4 py-2.5 font-semibold">Reviews</th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-slate-100">
+        {% for p in items %}
+          <tr class="hover:bg-slate-50">
+            <td class="px-4 py-2.5 text-slate-900">
+              {% if p.url %}
+                <a href="{{ p.url }}" target="_blank" rel="noopener" class="hover:text-brand-700">{{ p.name }}</a>
+              {% else %}{{ p.name }}{% endif %}
+            </td>
+            <td class="px-4 py-2.5 text-slate-600">{{ p.brand or '—' }}</td>
+            <td class="px-4 py-2.5 text-slate-600">{{ p.source }}</td>
+            <td class="px-4 py-2.5 text-slate-900 text-right tabular-nums">
+              {% if p.price %}${{ '%.2f' % p.price }}{% else %}—{% endif %}
+            </td>
+            <td class="px-4 py-2.5 text-slate-600 text-right tabular-nums">
+              {% if p.rating %}{{ '%.1f' % p.rating }}{% else %}—{% endif %}
+            </td>
+            <td class="px-4 py-2.5 text-slate-600 text-right tabular-nums">
+              {% if p.reviews %}{{ '{:,}'.format(p.reviews|int) }}{% else %}—{% endif %}
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+{% endif %}

@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block search_target %}/partials/recommendations{% endblock %}
+{% block date_target %}/partials/recommendations{% endblock %}
+
+{% block main %}
+<div class="mb-6 max-w-3xl">
+  <h1 class="text-xl font-semibold text-slate-900">New scrape run</h1>
+  <p class="text-sm text-slate-500 mt-0.5">
+    Re-scrapes Home Depot, Lowes, and Target via Apify, refreshes Jerry's catalog, and rebuilds the gap analysis.
+    Typical run takes <strong class="text-slate-700">two to three minutes</strong>. Apify spend is capped at the budget you set.
+  </p>
+</div>
+
+<div class="bg-white border border-slate-200 rounded-xl p-6 max-w-3xl">
+  {% if status.state == 'running' %}
+    <div class="mb-4 text-sm text-slate-700">A run is already in progress. Live status below.</div>
+  {% else %}
+    <form method="post" action="/run/start"
+          hx-post="/run/start" hx-target="#run-status" hx-swap="innerHTML"
+          class="flex flex-wrap items-end gap-4 mb-6">
+      <label class="flex flex-col text-xs uppercase tracking-wide text-slate-500 font-semibold gap-1">
+        Budget ($)
+        <input type="number" name="budget" min="1" max="100" step="1" value="5"
+               class="w-28 bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm font-medium text-slate-900 tabular-nums focus:outline-none focus:border-brand-600" />
+      </label>
+      <label class="flex flex-col text-xs uppercase tracking-wide text-slate-500 font-semibold gap-1">
+        Max products
+        <input type="number" name="max_results" min="50" max="2000" step="50" value="400"
+               class="w-32 bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm font-medium text-slate-900 tabular-nums focus:outline-none focus:border-brand-600" />
+      </label>
+      <button type="submit"
+              class="bg-brand-600 hover:bg-brand-700 text-white text-sm font-semibold px-4 py-2 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2 transition">
+        Start run
+      </button>
+    </form>
+  {% endif %}
+
+  <div id="run-status">
+    {% include "partials/_run_status.html" %}
+  </div>
+</div>
+{% endblock %}

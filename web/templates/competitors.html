@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block search_target %}/partials/competitors{% endblock %}
+{% block date_target %}/partials/competitors{% endblock %}
+
+{% block main %}
+<div class="mb-5">
+  <h1 class="text-xl font-semibold text-slate-900">Competitor Catalog</h1>
+  <p class="text-sm text-slate-500 mt-0.5">
+    Everything scraped this snapshot.
+    {% if snapshot_summary %}<span class="text-slate-400">{{ snapshot_summary.competitor_count }} items across {{ snapshot_summary.sources | length }} retailers.</span>{% endif %}
+  </p>
+</div>
+
+<div class="flex flex-wrap items-center gap-2 mb-4">
+  <select data-filter name="category"
+          class="bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-600"
+          hx-get="/partials/competitors" hx-trigger="change" hx-target="#tab-content"
+          hx-include="[data-filter], [name=q]">
+    {% for c in categories %}<option {% if c == category %}selected{% endif %}>{{ c }}</option>{% endfor %}
+  </select>
+  <select data-filter name="source"
+          class="bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-600"
+          hx-get="/partials/competitors" hx-trigger="change" hx-target="#tab-content"
+          hx-include="[data-filter], [name=q]">
+    {% for s in sources %}<option {% if s == source %}selected{% endif %}>{{ s }}</option>{% endfor %}
+  </select>
+</div>
+
+<div id="tab-content">
+  {% include "partials/_competitor_rows.html" %}
+</div>
+{% endblock %}

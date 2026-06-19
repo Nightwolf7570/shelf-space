@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Shelf Space</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/htmx.org@1.9.12"></script>
+  <link rel="stylesheet" href="/static/app.css" />
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: { sans: ['system-ui', '-apple-system', 'Segoe UI', 'Inter', 'sans-serif'] },
+          colors: {
+            brand: { 50: '#fef3e7', 100: '#fde4c4', 600: '#c2410c', 700: '#9a3412' },
+          },
+        },
+      },
+    };
+  </script>
+</head>
+<body class="bg-slate-50 text-slate-900 font-sans antialiased">
+
+  <header class="bg-white border-b border-slate-200 sticky top-0 z-30">
+    <div class="max-w-[1500px] mx-auto px-6 py-3 flex items-center gap-4">
+      <a href="/" class="flex items-center gap-2 shrink-0">
+        <span class="w-7 h-7 rounded-md bg-brand-600 text-white text-sm font-bold flex items-center justify-center">S</span>
+        <span class="font-semibold text-slate-900">Shelf Space</span>
+      </a>
+
+      <div class="hidden md:block text-xs text-slate-500 border-l border-slate-200 pl-4">
+        Jerry's Ace Hardware #17892 · Denver
+      </div>
+
+      <form class="flex-1 max-w-xl ml-auto" onsubmit="return false;">
+        <input
+          type="search"
+          name="q"
+          value="{{ q or '' }}"
+          placeholder="Search products, brands…"
+          class="w-full bg-slate-50 border border-slate-200 rounded-lg px-4 py-2 text-sm focus:outline-none focus:border-brand-600 focus:bg-white"
+          hx-get="{% block search_target %}/partials/recommendations{% endblock %}"
+          hx-trigger="keyup changed delay:250ms, search"
+          hx-target="#tab-content"
+          hx-include="[data-filter]"
+          hx-push-url="false"
+        />
+      </form>
+
+      <select
+        data-filter
+        name="date"
+        class="bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-brand-600"
+        hx-get="{% block date_target %}/partials/recommendations{% endblock %}"
+        hx-trigger="change"
+        hx-target="#tab-content"
+        hx-include="[data-filter], [name=q]"
+      >
+        {% for d in snapshot_dates %}
+          <option value="{{ d }}" {% if d == snapshot_date %}selected{% endif %}>
+            {{ d }}{% if loop.first %} · latest{% endif %}
+          </option>
+        {% endfor %}
+      </select>
+
+      <a href="/run"
+         class="inline-flex items-center gap-1.5 bg-brand-600 hover:bg-brand-700 text-white text-sm font-semibold px-3.5 py-2 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2 transition">
+        <svg xmlns="http://www.w3.org/2000/svg" class="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+          <path fill-rule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clip-rule="evenodd"/>
+        </svg>
+        New Run
+      </a>
+    </div>
+
+    <nav class="max-w-[1500px] mx-auto px-6 flex gap-1 text-sm">
+      {% set tabs = [
+        ('recommendations', '/', 'Recommendations'),
+        ('inventory', '/inventory', "Jerry's Inventory"),
+        ('competitors', '/competitors', 'Competitor Catalog'),
+        ('changes', '/changes', 'Changes'),
+      ] %}
+      {% for key, href, label in tabs %}
+        <a href="{{ href }}"
+           class="px-3 py-2.5 border-b-2 {% if active_tab == key %}border-brand-600 text-slate-900 font-semibold{% else %}border-transparent text-slate-500 hover:text-slate-900{% endif %}">
+          {{ label }}
+        </a>
+      {% endfor %}
+    </nav>
+  </header>
+
+  <main class="max-w-[1500px] mx-auto px-6 py-6">
+    {% block main %}{% endblock %}
+  </main>
+
+  <!-- Slide-out detail panel -->
+  <div id="detail-backdrop"
+       class="fixed inset-0 bg-black/20 z-40 hidden"
+       onclick="closeDetail()"></div>
+  <aside id="detail-panel"
+         class="fixed top-0 right-0 h-full w-full sm:w-[480px] bg-white border-l border-slate-200 shadow-xl z-50 transform translate-x-full transition-transform duration-200 overflow-y-auto">
+  </aside>
+
+  <script>
+    function openDetail() {
+      document.getElementById('detail-panel').classList.remove('translate-x-full');
+      document.getElementById('detail-backdrop').classList.remove('hidden');
+    }
+    function closeDetail() {
+      document.getElementById('detail-panel').classList.add('translate-x-full');
+      document.getElementById('detail-backdrop').classList.add('hidden');
+      document.getElementById('detail-panel').innerHTML = '';
+    }
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeDetail(); });
+    document.body.addEventListener('htmx:afterSwap', (e) => {
+      if (e.detail.target.id === 'detail-panel' && e.detail.target.innerHTML.trim()) openDetail();
+    });
+  </script>
+</body>
+</html>
