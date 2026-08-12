@@ -20,7 +20,7 @@ def test_target_redsky():
     print("=" * 60)
 
     # Target Redsky API endpoint for search
-    api_key = "REDACTED_TARGET_KEY"
+    api_key = os.environ.get("TARGET_REDSKY_KEY", "")
     store_id = "3330"  # A Denver-area Target store
     zip_code = "80205"
 

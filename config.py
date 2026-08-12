@@ -1,10 +1,12 @@
 """Constants and category configuration for MysteryScraper."""
 
+import os
+
 ACE_STORE_ID = "17892"
 DENVER_ZIP = "80205"
 HD_STORE_ID = "1513"
 TARGET_STORE_ID = "3330"
-TARGET_REDSKY_KEY = "REDACTED_TARGET_KEY"
+TARGET_REDSKY_KEY = os.environ.get("TARGET_REDSKY_KEY", "")
 
 # Categories derived from Jerry's Ace catalog productType field.
 # Paint + cleaning are Stephen's confirmed priorities.
