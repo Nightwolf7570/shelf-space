@@ -1,19 +1,19 @@
 # ShelfSpace
 
-Competitive shelf intelligence for a local hardware store: see what Home Depot, Target, and Lowe's are selling that you aren't — and what changed since last month.
+Compare a local hardware store's products with Home Depot, Target, and Lowe's. See what the store is missing and what changed since last month.
 
-**🏆 1st Place — ACE Hardware x Apify Hackathon**
+![1st Place — ACE Hardware x Apify Hackathon](https://img.shields.io/badge/1st_Place-ACE_Hardware_x_Apify_Hackathon-FF3B3B?style=for-the-badge&labelColor=0D1117&logo=data%3Aimage%2Fsvg%2Bxml%3Bbase64%2CPHN2ZyB3aWR0aD0iMTA4MCIgaGVpZ2h0PSIxMDgwIiB2aWV3Qm94PSIwIDAgMTA4MCAxMDgwIiBmaWxsPSJub25lIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciPjxwYXRoIGZpbGw9IiNGRkZGRkYiIGQ9Ik02MDcuODU5IDc4LjIyMThIOTg3Ljc4NUM5OTUuNTEzIDc4LjIyMTggMTAwMS43OCA4NC40ODY4IDEwMDEuNzggOTIuMjE1MVY2NzIuODM0QzEwMDEuNzggNjg2Ljc0MiA5ODMuNjkgNjkyLjEzNCA5NzYuMDc1IDY4MC40OTZMNTk2LjE1IDk5Ljg3N0M1OTAuMDYgOTAuNTcwMyA1OTYuNzM3IDc4LjIyMTggNjA3Ljg1OSA3OC4yMjE4WiIgLz48cGF0aCBmaWxsPSIjRkZGRkZGIiBkPSJNNDcyLjE0MSA3OC4yMjE4SDkyLjIxNUM4NC40ODY3IDc4LjIyMTggNzguMjIxNyA4NC40ODY4IDc4LjIyMTcgOTIuMjE1MVY2NzIuODM0Qzc4LjIyMTcgNjg2Ljc0MiA5Ni4zMDk0IDY5Mi4xMzQgMTAzLjkyNCA2ODAuNDk2TDQ4My44NSA5OS44NzdDNDg5Ljk0IDkwLjU3MDMgNDgzLjI2MyA3OC4yMjE4IDQ3Mi4xNDEgNzguMjIxOFoiIC8%2BPHBhdGggZmlsbD0iI0ZGRkZGRiIgZD0iTTUzMy40OTEgNTQzLjA4NkwxMDEuODk1IDk3Ny45MjdDOTMuMTMwMiA5ODYuNzU4IDk5LjM4NDkgMTAwMS43OCAxMTEuODI2IDEwMDEuNzhIOTY4LjUyOUM5ODAuOTE5IDEwMDEuNzggOTg3LjE5NyA5ODYuODYzIDk3OC41MzUgOTc4LjAwM0w1NTMuNDI5IDU0My4xNjFDNTQ3Ljk2OSA1MzcuNTc2IDUzOC45OTMgNTM3LjU0MiA1MzMuNDkxIDU0My4wODZaIiAvPjwvc3ZnPg%3D%3D)
 
-A neighborhood ACE store (Jerry's Ace Hardware #17892, Denver) has no visibility into competitor assortment or pricing — big-box chains adjust both constantly, and the store owner finds out when customers stop coming in for paint. ShelfSpace scrapes the big-box catalogs on a schedule, lines them up against Jerry's actual catalog, and turns the difference into a ranked "stock this next" list plus a month-over-month change report, all in a Streamlit dashboard.
+Jerry's Ace Hardware #17892 in Denver needs a simple way to track competitors' products and prices. ShelfSpace regularly collects catalogs from large retailers and compares them with Jerry's catalog. A Streamlit dashboard shows a ranked list of products to stock and a monthly change report.
 
 ## What it does
 
-- **Scrapes four sources per run** — Jerry's own ACE catalog via the acehardware.com search API (store-scoped), plus Home Depot, Target, and Lowe's via Apify actors (`rigelbytes/homedepot-scraper`, `automation-lab/target-scraper`, and `automation-lab/google-shopping-scraper` filtered to Lowe's).
-- **Gap analysis** — normalizes everything to one product schema, resolves brand aliases (Rust-Oleum vs "rustoleum", etc.), and flags competitor products from brands Jerry's doesn't carry.
-- **Ranked recommendations** — scores each gap on bestseller badges, ratings, review volume, and how many competitors carry it; merges duplicates across stores.
-- **Month-over-month diffs** — each run is a dated snapshot in `data/snapshots/`; consecutive snapshots are diffed into new items, removed items, and price moves of 5%+ (`data/diffs/`).
-- **Dashboard** — five tabs (Jerry's Inventory, Gaps & Recommendations, Competitor Catalog, Changes, Scraped Data), category/competitor filters, snapshot-version switcher, and a PDF export of the recommendations for the store owner.
-- **Cost guardrails** — a per-run Apify budget (default $5): run costs are tracked live and actors are aborted mid-run if spend or item limits are exceeded. The Home Depot actor gets retried up to 3x because Akamai bot protection makes it flaky.
+- **Four data sources** — each run collects Jerry's store-specific ACE catalog through the acehardware.com search API. It also collects Home Depot, Target, and Lowe's data with Apify actors: `rigelbytes/homedepot-scraper`, `automation-lab/target-scraper`, and `automation-lab/google-shopping-scraper` filtered to Lowe's.
+- **Gap analysis** — converts all data to one product format, matches brand variations such as Rust-Oleum and "rustoleum," and finds competitor brands that Jerry's does not carry.
+- **Ranked recommendations** — scores missing products by bestseller badges, ratings, review count, and the number of competitors that carry them. It also combines duplicate products from different stores.
+- **Monthly changes** — saves each run as a dated file in `data/snapshots/`. It compares each snapshot with the previous one to find added products, removed products, and price changes of at least 5%. Results go in `data/diffs/`.
+- **Dashboard** — provides five tabs: Jerry's Inventory, Gaps & Recommendations, Competitor Catalog, Changes, and Scraped Data. You can filter by category or competitor, switch snapshots, and export recommendations as a PDF.
+- **Cost limits** — sets an Apify budget for each run, with a $5 default. It tracks costs and stops actors that exceed spending or item limits. It retries the Home Depot actor up to three times because Akamai bot protection can make it unreliable.
 
 ## How it works
 
@@ -28,18 +28,20 @@ flowchart LR
     D --> UI
 ```
 
-`run_snapshot.py` is the pipeline entrypoint: it runs the Target and Lowe's actors as single batched calls and Home Depot as a category browse, all in parallel threads, normalizes the results, saves the day's snapshot, prints ranked recommendations, and diffs against the previous snapshot if one exists. The dashboard reads the snapshot files — and can also re-run the whole pipeline from a sidebar button with your chosen budget and product cap.
+`run_snapshot.py` starts the pipeline. It runs single batch calls for Target and Lowe's and a category search for Home Depot. These tasks run in parallel. The script then standardizes the results, saves the day's snapshot, prints ranked recommendations, and compares the data with the previous snapshot when available.
 
-There's also an alternate collector, `scrape_all.py`, which pulls the same categories through SerpAPI (Google Shopping + Home Depot native engine) and Target's Redsky API directly — useful when the Apify actors are being fought off by bot protection.
+The dashboard reads the saved snapshots. A sidebar button can run the full pipeline again with your chosen budget and product limit.
+
+`scrape_all.py` is an alternative data collector. It gets the same categories through SerpAPI, using Google Shopping and Home Depot's native search, and calls Target's Redsky API directly. Use it when bot protection blocks the Apify actors.
 
 ## Tech stack
 
-- **Python** — stdlib `urllib` for the direct store APIs, `ThreadPoolExecutor` for parallel scraping
-- **Apify** (`apify-client`) — competitor catalog actors, residential proxies
-- **Streamlit** — dashboard, with custom CSS and a light theme
+- **Python** — standard-library `urllib` for direct store APIs and `ThreadPoolExecutor` for parallel collection
+- **Apify** (`apify-client`) — competitor catalog actors and residential proxies
+- **Streamlit** — dashboard with custom CSS and a light theme
 - **ReportLab** — PDF export of recommendations
 - **SerpAPI** — optional fallback data source
-- No database: snapshots are plain dated JSON files, which is exactly enough for a monthly diff
+- **Storage** — dated JSON snapshot files; no database required
 
 ## Run it locally
 
@@ -58,8 +60,10 @@ python run_snapshot.py --categories paint --max-results 400 --budget 5
 streamlit run app.py
 ```
 
-The repo ships with two real snapshots in `data/snapshots/` and one diff in `data/diffs/`, so the dashboard works out of the box without any keys — you only need them to scrape fresh data. (Heads up: the app's internal codename is **MysteryScraper** — that's the wordmark you'll see in the dashboard.)
+The repository includes two real snapshots in `data/snapshots/` and one comparison in `data/diffs/`. The dashboard therefore works without API keys. You only need keys to collect new data.
+
+The app's internal name is **MysteryScraper**, which appears in the dashboard.
 
 ## Built at
 
-ACE Hardware x Apify Hackathon — built for a real store (Jerry's Ace Hardware, 2101 N Humboldt St, Denver) with real catalog data. First place.
+Built with real catalog data for Jerry's Ace Hardware at 2101 N Humboldt St in Denver. Winner of the ACE Hardware x Apify Hackathon.
